@@ -8,6 +8,10 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
   <img src="docs/images/imageflow-overview.png" alt="ImageFlow 主界面：图片列表、裁剪画布、尺寸和水印设置" width="1000">
 </p>
 
+<p align="center">
+  <img src="docs/images/watermark-editor.png" alt="ImageFlow 水印编辑器：水印位置、尺寸、透明度和边距设置" width="1000">
+</p>
+
 ## 基本使用流程
 
 1. 点击“导入照片”，选择需要交付的成片。
