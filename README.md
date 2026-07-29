@@ -32,7 +32,7 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
 
 ### 方式一：使用安装包（推荐）
 
-1. 点击下载仓库内的 [安装包](releases/NuPhy图片交付助手-安装包.zip)。
+1. 点击直接下载 [安装包（64.8 MB）](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/NuPhy图片交付助手-安装包.zip)。
 2. 在下载完成的 ZIP 文件上单击右键，选择“全部提取…”。请先完整解压，**不要在压缩包内直接运行**。
 3. 打开解压后的文件夹，双击 `Install.bat`。
 4. 在弹出的“选择安装位置”窗口中选择需要安装的磁盘或文件夹，例如 `D:\软件`；安装程序会自动创建应用文件夹。
