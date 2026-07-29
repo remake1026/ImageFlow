@@ -1,0 +1,44 @@
+# Python bytecode and runtime caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local Python environments
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# PyInstaller generated output (keep the .spec source file tracked)
+/build*/
+/dist*/
+/installer_staging/
+*.manifest
+*.spec.bak
+
+# Generated release archives
+*.zip
+
+# IDE and editor local settings
+.idea/
+.vscode/
+*.code-workspace
+*.suo
+*.user
+
+# Windows and macOS filesystem metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+~$*
