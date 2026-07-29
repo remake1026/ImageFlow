@@ -24,6 +24,8 @@ ENV/
 
 # Generated release archives
 *.zip
+!/releases/
+!/releases/*.zip
 
 # IDE and editor local settings
 .idea/
