@@ -25,6 +25,7 @@ from app.anchor_selector import AnchorSelector
 from app.crop_preview_dialog import CropPreviewDialog, create_crop_icon
 from app.watermark_editor_dialog import WatermarkEditorDialog
 from app.exporter import ExportJob, ExportWorker, build_filename
+from app.importer import ImportResult, ImportWorker
 from app.image_processor import crop_box, load_thumbnail, output_size, paste_watermark, pil_to_pixmap
 from app.models import CropSettings, ExportSettings, PhotoItem, SizeTemplate, WatermarkSettings, builtin_templates
 from app.product_catalog import load_product_catalog
@@ -162,6 +163,13 @@ class TemplateCheckDelegate(QStyledItemDelegate):
         painter.setPen(QColor("#B9B9B9"))
         painter.drawText(option.rect.adjusted(30, 0, -6, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(index.data(Qt.ItemDataRole.DisplayRole) or ""))
         painter.restore()
+
+
+class FixedThumbnailList(QListWidget):
+    """固定预览缩略图条，滚轮不会改变缩略图的位置。"""
+
+    def wheelEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        event.accept()
 
 
 class ElidedPathLabel(QLabel):
@@ -310,6 +318,7 @@ class MainWindow(QMainWindow):
         self._restoring_undo = False
         self._syncing = False
         self.worker: Optional[ExportWorker] = None
+        self.import_worker: Optional[ImportWorker] = None
         self.presets = load_presets()
         self.product_catalog = load_product_catalog()
         self.recent_color_by_sku: dict[str, str] = {
@@ -319,7 +328,10 @@ class MainWindow(QMainWindow):
         }
         self.export_settings.output_folder = self.presets.get("last_output", "")
         self._build_ui()
+        self._restore_last_session()
         self._refresh_template_list()
+        self._write_export_controls()
+        self._refresh_photo_list()
         self._refresh_all()
 
     # ---------- 界面搭建 ----------
@@ -340,6 +352,13 @@ class MainWindow(QMainWindow):
             action = QAction(text, self)
             action.triggered.connect(handler)
             toolbar.addAction(action)
+        self.undo_action = QAction("撤销", self)
+        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.undo_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self.undo_action.setToolTip("撤销上一步操作（Ctrl+Z）")
+        self.undo_action.triggered.connect(self.undo_last_action)
+        self.addAction(self.undo_action)
+        toolbar.addAction(self.undo_action)
         toolbar_spacer = QWidget()
         toolbar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(toolbar_spacer)
@@ -358,12 +377,6 @@ class MainWindow(QMainWindow):
         self.crop_result_preview_check.setToolTip("仅查看当前裁剪结果；取消勾选后恢复裁剪编辑")
         self.crop_result_preview_check.toggled.connect(self._toggle_crop_result_preview)
         self._toolbar_crop_layout.addWidget(self.crop_result_preview_check)
-        self.undo_action = QAction("撤销", self)
-        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        self.undo_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
-        self.undo_action.triggered.connect(self.undo_last_action)
-        self.addAction(self.undo_action)
-
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("mainSplitter")
         splitter.addWidget(self._build_left_panel())
@@ -486,7 +499,7 @@ class MainWindow(QMainWindow):
         preview_row.addStretch(1)
         layout.addLayout(preview_row)
         # 紧凑横向缩略图条：展示当前尺寸下所有已导入照片的预览。
-        self.size_preview_list = QListWidget()
+        self.size_preview_list = FixedThumbnailList()
         self.size_preview_list.setObjectName("sizePreviewList")
         self.size_preview_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.size_preview_list.setFlow(QListWidget.Flow.LeftToRight)
@@ -826,6 +839,9 @@ class MainWindow(QMainWindow):
         self.quality_control = SliderValueControl(1, 100, 100, 0, "", "修改 JPG/WebP 质量", default_value=100)
         self.quality_control.value_changed.connect(self._on_quality_changed)
         self.quality_control.slider.sliderPressed.connect(self._push_undo_state)
+        self.preserve_resolution_check = GuideCheckBox("保留原图分辨率（不压缩）")
+        self.preserve_resolution_check.setChecked(self.export_settings.preserve_source_resolution)
+        self.preserve_resolution_check.setToolTip("按所选比例裁剪，但不缩小像素尺寸；取消勾选后按模板的固定像素尺寸导出。")
         # 与预览区“显示三分法辅助线”复用同一勾选控件：选中时在橙色方块上
         # 绘制白色对勾，避免仅显示色块而看不出当前是否已启用。
         self.subfolder_check = GuideCheckBox("按尺寸建立子文件夹"); self.subfolder_check.setChecked(True)
@@ -833,7 +849,7 @@ class MainWindow(QMainWindow):
         self.icc_check = GuideCheckBox("保留 ICC 色彩配置"); self.icc_check.setChecked(True)
         self.exif_check = GuideCheckBox("保留 EXIF 信息")
         form.addRow("JPG/WebP 质量", self.quality_control)
-        form.addRow(self.subfolder_check); form.addRow(self.overwrite_check); form.addRow(self.icc_check); form.addRow(self.exif_check)
+        form.addRow(self.preserve_resolution_check); form.addRow(self.subfolder_check); form.addRow(self.overwrite_check); form.addRow(self.icc_check); form.addRow(self.exif_check)
         layout.addLayout(form)
         return page
 
@@ -1073,6 +1089,58 @@ class MainWindow(QMainWindow):
             self._restoring_undo = False
         self.statusBar().showMessage("已撤销上一步操作。", 2000)
 
+    # ---------- 自动恢复上次任务 ----------
+    def _session_payload(self) -> dict[str, object]:
+        """生成可写入预设文件的当前任务快照，不包含可撤销历史。"""
+        self._read_export_controls()
+        export = self.export_settings.to_dict()
+        export["replace_original_name"] = self.export_settings.replace_original_name
+        return {
+            "version": 1,
+            "photos": [photo.to_dict() for photo in self.photos],
+            "templates": [template.to_dict() for template in self.templates],
+            "watermark_path": self.watermark_path,
+            "active_watermark_preset": self.active_watermark_preset,
+            "export": export,
+            "current_photo_index": self.current_photo_index,
+            "current_template_id": self.current_template_id,
+        }
+
+    def _save_last_session(self) -> None:
+        try:
+            self.presets["last_session"] = self._session_payload()
+            save_presets(self.presets)
+        except (OSError, TypeError, ValueError):
+            # 自动保存失败不应阻止用户正常关闭窗口。
+            pass
+
+    def _restore_last_session(self) -> None:
+        data = self.presets.get("last_session")
+        if not isinstance(data, dict):
+            return
+        try:
+            photos = [PhotoItem.from_dict(item) for item in data.get("photos", []) if isinstance(item, dict)]
+            self.photos = [photo for photo in photos if Path(photo.path).is_file()]
+            templates = [SizeTemplate.from_dict(item) for item in data.get("templates", []) if isinstance(item, dict)]
+            if templates:
+                self.templates = templates
+            watermark_path = data.get("watermark_path", "")
+            self.watermark_path = watermark_path if isinstance(watermark_path, str) and Path(watermark_path).is_file() else ""
+            self.active_watermark_preset = str(data.get("active_watermark_preset", ""))
+            export = data.get("export", {})
+            if isinstance(export, dict):
+                self.export_settings = ExportSettings.from_dict(export)
+            self.current_photo_index = int(data.get("current_photo_index", 0)) if self.photos else -1
+            requested_template = data.get("current_template_id", "original")
+            available_templates = {template.id for template in self.templates}
+            self.current_template_id = requested_template if requested_template in available_templates else self.templates[0].id
+        except (KeyError, TypeError, ValueError):
+            return
+
+    def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self._save_last_session()
+        super().closeEvent(event)
+
     def dragEnterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if event.mimeData().hasUrls() and any(
             url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES
@@ -1100,18 +1168,64 @@ class MainWindow(QMainWindow):
         self._import_photo_paths(paths)
 
     def _import_photo_paths(self, paths: list[str]) -> None:
-        new_paths = [path for path in paths if path and path not in [item.path for item in self.photos]]
-        if new_paths:
-            self._push_undo_state()
-        added = 0
-        for path in new_paths:
-            self.photos.append(PhotoItem(path))
-            added += 1
+        existing_paths = {item.path for item in self.photos}
+        new_paths: list[str] = []
+        for path in paths:
+            if path and path not in existing_paths:
+                new_paths.append(path)
+                existing_paths.add(path)
+        if not new_paths:
+            if paths:
+                self._info("没有导入新图片", "所选图片已在当前任务中。")
+            return
+
+        self.import_worker = ImportWorker(new_paths)
+        self.import_progress = QProgressDialog("正在准备导入…", "取消导入", 0, len(new_paths), self)
+        self.import_progress.setWindowTitle("导入照片")
+        self.import_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.import_progress.setMinimumDuration(0)
+        self.import_progress.setAutoClose(False)
+        self.import_progress.setAutoReset(False)
+        self.import_progress.canceled.connect(self.import_worker.cancel)
+        self.import_worker.progress.connect(self._on_import_progress)
+        self.import_worker.completed.connect(self._on_import_completed)
+        self.import_worker.cancelled.connect(self._on_import_cancelled)
+        self.import_progress.show()
+        self.import_worker.start()
+
+    def _on_import_progress(self, current: int, total: int, path: str) -> None:
+        self.import_progress.setMaximum(total)
+        self.import_progress.setValue(current)
+        self.import_progress.setLabelText(f"正在导入 {current}/{total}：{Path(path).name}")
+
+    def _finish_import(self, result: ImportResult, was_cancelled: bool = False) -> None:
+        self.import_progress.close()
+        self.import_worker = None
+        added = len(result.thumbnails)
         if added:
-            self.current_photo_index = len(self.photos) - added
-            self._refresh_photo_list(); self._refresh_all()
-        elif paths:
-            self._info("没有导入新图片", "所选图片已在当前任务中。")
+            self._push_undo_state()
+            self.current_photo_index = len(self.photos)
+            for path, thumbnail in result.thumbnails:
+                self.photos.append(PhotoItem(path))
+                self.thumbnail_cache[path] = thumbnail
+            self._refresh_photo_list()
+            self._refresh_all()
+        if result.failed_paths:
+            filenames = "、".join(Path(path).name for path in result.failed_paths[:3])
+            suffix = "等" if len(result.failed_paths) > 3 else ""
+            self._info("部分图片未能导入", f"以下 {len(result.failed_paths)} 张图片无法读取：{filenames}{suffix}")
+        if was_cancelled:
+            message = f"已导入 {added} 张图片，未开始处理的图片未导入。" if added else "没有图片被导入。"
+            self._info("已取消导入", message)
+        elif added:
+            self.statusBar().showMessage(f"已导入 {added} 张图片。", 3000)
+
+    def _on_import_completed(self, result: ImportResult) -> None:
+        self._finish_import(result)
+
+    def _on_import_cancelled(self, result: ImportResult) -> None:
+        self._finish_import(result, was_cancelled=True)
+
 
     def delete_selected_photos(self) -> None:
         rows = sorted({item.row() for item in self.photo_list.selectedIndexes()}, reverse=True)
@@ -1433,12 +1547,12 @@ class MainWindow(QMainWindow):
     def _read_export_controls(self) -> None:
         s = self.export_settings
         s.output_folder = self.output_edit.text().strip(); s.image_format = self.format_combo.currentText(); s.jpg_quality = round(self.quality_control.value())
-        s.subfolders = self.subfolder_check.isChecked(); s.overwrite = self.overwrite_check.isChecked(); s.keep_icc = self.icc_check.isChecked(); s.keep_exif = self.exif_check.isChecked()
+        s.preserve_source_resolution = self.preserve_resolution_check.isChecked(); s.subfolders = self.subfolder_check.isChecked(); s.overwrite = self.overwrite_check.isChecked(); s.keep_icc = self.icc_check.isChecked(); s.keep_exif = self.exif_check.isChecked()
         s.brand = self.brand_edit.text().strip(); s.sku = self.sku_combo.currentText().strip(); s.color = self.color_combo.currentText().strip(); s.date = self.date_edit.text().strip(); s.start_sequence = self.sequence_spin.value(); s.replace_original_name = self.replace_original_name_check.isChecked(); s.naming_pattern = "{brand} {sku} {color} {date} {sequence} {original}"
 
     def _write_export_controls(self) -> None:
         s = self.export_settings
-        self.output_edit.setText(s.output_folder); self.format_combo.setCurrentText(s.image_format); self.quality_control.setValue(s.jpg_quality); self.subfolder_check.setChecked(s.subfolders); self.overwrite_check.setChecked(s.overwrite); self.icc_check.setChecked(s.keep_icc); self.exif_check.setChecked(s.keep_exif)
+        self.output_edit.setText(s.output_folder); self.format_combo.setCurrentText(s.image_format); self.quality_control.setValue(s.jpg_quality); self.preserve_resolution_check.setChecked(s.preserve_source_resolution); self.subfolder_check.setChecked(s.subfolders); self.overwrite_check.setChecked(s.overwrite); self.icc_check.setChecked(s.keep_icc); self.exif_check.setChecked(s.keep_exif)
         self.brand_edit.setText(s.brand or "NuPhy"); self.date_edit.setText(s.date)
         sku_index = self.sku_combo.findText(s.sku)
         self.sku_combo.setCurrentIndex(sku_index if sku_index >= 0 else -1)

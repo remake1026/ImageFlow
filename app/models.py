@@ -125,6 +125,7 @@ class ExportSettings:
     output_folder: str = ""
     image_format: str = "JPG"
     jpg_quality: int = 100
+    preserve_source_resolution: bool = True
     subfolders: bool = True
     overwrite: bool = False
     keep_icc: bool = True
