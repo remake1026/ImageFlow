@@ -69,7 +69,14 @@ class ExportWorker(QThread):
                     while destination.exists():
                         destination = folder / f"{stem}_{counter}{suffix}"
                         counter += 1
-                image, icc, exif = render_image(job.photo.path, job.template, job.photo.crop(job.template.id), self.watermark_path, job.photo.watermark(job.template.id))
+                image, icc, exif = render_image(
+                    job.photo.path,
+                    job.template,
+                    job.photo.crop(job.template.id),
+                    self.watermark_path,
+                    job.photo.watermark(job.template.id),
+                    self.settings.preserve_source_resolution,
+                )
                 save_args: dict = {}
                 if self.settings.keep_icc and icc:
                     save_args["icc_profile"] = icc

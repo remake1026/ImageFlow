@@ -16,9 +16,19 @@ def open_oriented(path: str) -> Image.Image:
     return ImageOps.exif_transpose(source)
 
 
-def output_size(source_size: tuple[int, int], template: SizeTemplate) -> tuple[int, int]:
+def output_size(
+    source_size: tuple[int, int],
+    template: SizeTemplate,
+    preserve_source_resolution: bool = False,
+) -> tuple[int, int]:
     if template.id == "original" or template.width <= 0 or template.height <= 0:
         return source_size
+    if preserve_source_resolution:
+        width, height = source_size
+        aspect = template.width / template.height
+        crop_width = min(width, height * aspect)
+        crop_height = crop_width / aspect
+        return max(1, round(crop_width)), max(1, round(crop_height))
     return template.width, template.height
 
 
@@ -82,20 +92,27 @@ def render_image(
     crop: CropSettings,
     watermark_path: str,
     watermark: WatermarkSettings,
+    preserve_source_resolution: bool = False,
 ) -> tuple[Image.Image, Optional[bytes], Optional[bytes]]:
     """返回最终图像和可选 ICC / EXIF 数据，始终由原图分辨率生成。"""
     with Image.open(source_path) as raw:
         icc = raw.info.get("icc_profile")
         exif = raw.getexif()
+        # 必须先依据原始 EXIF 校正像素；getexif() 返回的对象与 raw 关联，
+        # 若提前删除 Orientation，exif_transpose 将无法得知应旋转的方向。
+        source = ImageOps.exif_transpose(raw).convert("RGBA")
         if exif:
-            exif[0x0112] = 1  # 保存时不再产生错误旋转
+            # 像素已由 exif_transpose 校正；不能再附带原图方向标签，
+            # 否则部分查看器会按旧方向再旋转一次。
+            exif.pop(0x0112, None)
             exif_bytes: Optional[bytes] = exif.tobytes()
         else:
             exif_bytes = None
-        source = ImageOps.exif_transpose(raw).convert("RGBA")
-    target_size = output_size(source.size, template)
+    target_size = output_size(source.size, template, preserve_source_resolution)
     aspect = target_size[0] / target_size[1]
-    result = source.crop(crop_box(source.size, aspect, crop)).resize(target_size, Image.Resampling.LANCZOS)
+    result = source.crop(crop_box(source.size, aspect, crop))
+    if result.size != target_size:
+        result = result.resize(target_size, Image.Resampling.LANCZOS)
     result = paste_watermark(result, watermark_path, watermark)
     return result, icc, exif_bytes
 
