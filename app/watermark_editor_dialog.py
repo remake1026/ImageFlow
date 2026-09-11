@@ -49,7 +49,22 @@ class WatermarkEditorDialog(QDialog):
         self.watermark_path = watermark_path
         self.watermark = copy.deepcopy(watermark)
         self._watermark_presets = watermark_presets or {}
-        self.selected_preset_name = active_preset_name
+        self._syncing_controls = True
+        active_data = self._watermark_presets.get(active_preset_name)
+        if isinstance(active_data, dict):
+            settings_data = active_data.get("settings", active_data)
+            if isinstance(settings_data, dict):
+                enabled = self.watermark.enabled
+                self.watermark = WatermarkSettings.from_dict(settings_data)
+                self.watermark.enabled = enabled
+                preset_path = active_data.get("watermark_path")
+                if isinstance(preset_path, str):
+                    self.watermark_path = preset_path
+                self.selected_preset_name = active_preset_name
+            else:
+                self.selected_preset_name = ""
+        else:
+            self.selected_preset_name = ""
         self.created_presets: dict[str, dict[str, Any]] = {}
         self.deleted_preset_names: set[str] = set()
         self._watermark_thumbnail_path: Optional[str] = None
@@ -140,7 +155,8 @@ class WatermarkEditorDialog(QDialog):
         buttons = QWidget(); button_layout = QHBoxLayout(buttons); button_layout.setContentsMargins(0, 8, 0, 0); button_layout.addWidget(done); button_layout.addWidget(cancel)
         form.addRow(buttons)
         root.addWidget(controls)
-        self._rebuild_preset_combo(active_preset_name)
+        self._syncing_controls = False
+        self._rebuild_preset_combo(self.selected_preset_name)
         self._refresh_preview()
         QApplication.instance().installEventFilter(self)
 
@@ -162,6 +178,8 @@ class WatermarkEditorDialog(QDialog):
             self._refresh_preview()
 
     def _on_controls_changed(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        if self._syncing_controls:
+            return
         self.watermark.anchor = self.anchor_selector.anchor()
         self.watermark.size_percent = self.size_control.value()
         self.watermark.opacity = round(self.opacity_control.value())
@@ -170,6 +188,11 @@ class WatermarkEditorDialog(QDialog):
         self.watermark.offset_x = self.x_control.value()
         self.watermark.offset_y = self.y_control.value()
         self.watermark.safe_area = self.safe_check.isChecked()
+        # 用户手动调整后的参数不再冒充已保存预设，否则下次启动会误以为
+        # 应重新套用旧预设。需要保存时可继续使用下方“存储预设”。
+        if self.selected_preset_name:
+            self.selected_preset_name = ""
+            self._rebuild_preset_combo()
         self._refresh_preview()
 
     def _on_preset_selected(self, index: int) -> None:
@@ -257,14 +280,19 @@ class WatermarkEditorDialog(QDialog):
         self._rebuild_preset_combo(new_name)
 
     def _sync_controls_from_watermark(self) -> None:
-        self.anchor_selector.set_anchor(self.watermark.anchor)
-        self.size_control.setValue(self.watermark.size_percent)
-        self.opacity_control.setValue(self.watermark.opacity)
-        self.rotation_control.setValue(self.watermark.rotation)
-        self.margin_control.setValue(self.watermark.margin_percent)
-        self.x_control.setValue(self.watermark.offset_x)
-        self.y_control.setValue(self.watermark.offset_y)
-        self.safe_check.setChecked(self.watermark.safe_area)
+        was_syncing = self._syncing_controls
+        self._syncing_controls = True
+        try:
+            self.anchor_selector.set_anchor(self.watermark.anchor)
+            self.size_control.setValue(self.watermark.size_percent)
+            self.opacity_control.setValue(self.watermark.opacity)
+            self.rotation_control.setValue(self.watermark.rotation)
+            self.margin_control.setValue(self.watermark.margin_percent)
+            self.x_control.setValue(self.watermark.offset_x)
+            self.y_control.setValue(self.watermark.offset_y)
+            self.safe_check.setChecked(self.watermark.safe_area)
+        finally:
+            self._syncing_controls = was_syncing
 
     def _move_preview(self, direction: int) -> None:
         if len(self._preview_items) <= 1:

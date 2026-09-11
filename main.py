@@ -23,12 +23,14 @@ from app.combo_box import EditablePopupComboBox, StyledComboBox
 from app.crop_canvas import CropCanvas
 from app.anchor_selector import AnchorSelector
 from app.crop_preview_dialog import CropPreviewDialog, create_crop_icon
+from app.management_dialog import ManagementDialog
 from app.watermark_editor_dialog import WatermarkEditorDialog
 from app.exporter import ExportJob, ExportWorker, build_filename
 from app.importer import ImportResult, ImportWorker
 from app.image_processor import crop_box, load_thumbnail, output_size, paste_watermark, pil_to_pixmap
 from app.models import CropSettings, ExportSettings, PhotoItem, SizeTemplate, WatermarkSettings, builtin_templates
 from app.product_catalog import load_product_catalog
+from app.window_style import CustomTitleBar, frameless_native_event
 from app.slider_value_control import ResettableSlider, SliderValueControl
 from app.presets import load_presets, save_presets
 from app.project_io import load_project, save_project
@@ -303,6 +305,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowTitle("ImageFlow")
         self.resize(1580, 920)
         self.setAcceptDrops(True)
@@ -317,8 +320,15 @@ class MainWindow(QMainWindow):
         self._undo_stack: list[dict[str, object]] = []
         self._restoring_undo = False
         self._syncing = False
+        # 拖动裁剪框时只刷新画布；缩略图条在用户停下后再批量重绘，避免水印
+        # 合成抢占主线程造成拖动卡顿。
+        self._size_preview_refresh_timer = QTimer(self)
+        self._size_preview_refresh_timer.setSingleShot(True)
+        self._size_preview_refresh_timer.setInterval(180)
+        self._size_preview_refresh_timer.timeout.connect(self._refresh_size_previews)
         self.worker: Optional[ExportWorker] = None
         self.import_worker: Optional[ImportWorker] = None
+        self.startup_worker: Optional[ImportWorker] = None
         self.presets = load_presets()
         self.product_catalog = load_product_catalog()
         self.recent_color_by_sku: dict[str, str] = {
@@ -331,19 +341,31 @@ class MainWindow(QMainWindow):
         self._restore_last_session()
         self._refresh_template_list()
         self._write_export_controls()
-        self._refresh_photo_list()
-        self._refresh_all()
+        # 先用占位图构建界面，让窗口立即出现；上次会话的照片随后在后台解码。
+        self._refresh_photo_list(cached_only=True)
+        self._refresh_size_preview_selector()
+        self._sync_crop_controls()
+        self._sync_watermark_controls()
+        self._update_naming_rule_preview()
+        if self.photos:
+            self.statusBar().showMessage("正在后台恢复上次任务…")
+            QTimer.singleShot(0, self._start_restored_session_loading)
+        else:
+            self._refresh_all()
 
     # ---------- 界面搭建 ----------
     def _build_ui(self) -> None:
+        self._title_bar = CustomTitleBar(
+            self,
+            _resource_path("resources/imageflow-logo.png"),
+            self.open_management_dialog,
+        )
+        self.setMenuWidget(self._title_bar)
+
         toolbar = self.addToolBar("主工具")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(18, 18))
-        brand = QLabel("◆  ImageFlow")
-        brand.setObjectName("appBrand")
-        toolbar.addWidget(brand)
-        toolbar.addSeparator()
         actions = [
             ("导入照片", self.import_photos), ("保存项目", self.save_project),
             ("打开项目", self.open_project), ("上一张", self.previous_photo), ("下一张", self.next_photo),
@@ -372,11 +394,11 @@ class MainWindow(QMainWindow):
         self._toolbar_right_reserve = QWidget()
         self._toolbar_right_reserve.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(self._toolbar_right_reserve)
-        self.crop_result_preview_check = GuideCheckBox("显示裁剪后预览")
-        self.crop_result_preview_check.setObjectName("cropResultPreviewCheck")
-        self.crop_result_preview_check.setToolTip("仅查看当前裁剪结果；取消勾选后恢复裁剪编辑")
-        self.crop_result_preview_check.toggled.connect(self._toggle_crop_result_preview)
-        self._toolbar_crop_layout.addWidget(self.crop_result_preview_check)
+        self.restore_composition_preview_button = QPushButton("恢复默认构图预览")
+        self.restore_composition_preview_button.setObjectName("restoreCompositionPreviewButton")
+        self.restore_composition_preview_button.setToolTip("从裁剪后预览返回默认构图编辑；不会改动裁剪参数")
+        self.restore_composition_preview_button.clicked.connect(self._restore_default_composition_preview)
+        self._toolbar_crop_layout.addWidget(self.restore_composition_preview_button)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("mainSplitter")
         splitter.addWidget(self._build_left_panel())
@@ -455,6 +477,7 @@ class MainWindow(QMainWindow):
         self.canvas.crop_changed.connect(self._on_canvas_crop_changed)
         self.canvas.watermark_changed.connect(self._on_canvas_watermark_changed)
         self.canvas.restore_requested.connect(self.auto_center)
+        self.canvas.result_preview_requested.connect(self._show_crop_result_preview)
         self.canvas.edit_started.connect(self._push_undo_state)
         layout.addWidget(self.canvas, 1)
         controls_frame = QFrame()
@@ -485,7 +508,6 @@ class MainWindow(QMainWindow):
         self._crop_edit_controls.append(self.guide_check)
         controls.addStretch()
         layout.addWidget(controls_frame)
-        self._toolbar_crop_layout.addWidget(self.crop_result_preview_check)
         preview_row = QHBoxLayout()
         preview_row.setContentsMargins(4, 2, 4, 0)
         preview_title = QLabel("尺寸预览")
@@ -505,9 +527,10 @@ class MainWindow(QMainWindow):
         self.size_preview_list.setFlow(QListWidget.Flow.LeftToRight)
         self.size_preview_list.setWrapping(False)
         self.size_preview_list.setIconSize(QSize(66, 50))
-        self.size_preview_list.setGridSize(QSize(82, 64))
-        # 预览条只占固定的 80px 高度，宽度跟随中间工作区而非缩略图数量。
-        self.size_preview_list.setFixedHeight(80)
+        self.size_preview_list.setGridSize(QSize(84, 70))
+        # 为项目高度、内边距和横向滚动条分别预留空间，避免滚动条压住照片
+        # 下缘或选中框；宽度仍跟随中间工作区，而不是缩略图数量。
+        self.size_preview_list.setFixedHeight(108)
         self.size_preview_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.size_preview_list.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self.size_preview_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -746,6 +769,52 @@ class MainWindow(QMainWindow):
             save_presets(self.presets)
         self._update_naming_rule_preview()
 
+    def open_management_dialog(self) -> None:
+        """打开独立管理页面，维护缓存和命名用 SKU。"""
+        dialog = ManagementDialog(self.product_catalog, self)
+        dialog.catalog_changed.connect(self._on_product_catalog_changed)
+        dialog.exec()
+
+    def nativeEvent(self, event_type: object, message: object) -> tuple[bool, int]:
+        """无边框标题栏下仍使用 Windows 的原生窗口边缘缩放。"""
+        hit_test = frameless_native_event(self, message)
+        if hit_test is not None:
+            return True, hit_test
+        return super().nativeEvent(event_type, message)
+
+    def _on_product_catalog_changed(self, catalog: object) -> None:
+        """后台保存后立即刷新主界面的 SKU/颜色下拉框。"""
+        if not isinstance(catalog, dict):
+            return
+        previous_catalog = self.product_catalog
+        current_sku = self.sku_combo.currentText().strip()
+        cleaned_catalog = {
+            str(sku): [str(color) for color in colors]
+            for sku, colors in catalog.items()
+            if isinstance(sku, str) and isinstance(colors, list)
+        }
+        self.product_catalog = cleaned_catalog
+        removed_current = current_sku in previous_catalog and current_sku not in cleaned_catalog
+        self.sku_combo.blockSignals(True)
+        self.sku_combo.clear()
+        self.sku_combo.addItems(cleaned_catalog)
+        if current_sku and not removed_current:
+            self.sku_combo.setEditText(current_sku)
+        else:
+            self.sku_combo.setCurrentIndex(-1)
+            self.sku_combo.setEditText("")
+        self.sku_combo.blockSignals(False)
+        if removed_current:
+            self.color_combo.blockSignals(True)
+            self.color_combo.clear()
+            self.color_combo.setCurrentIndex(-1)
+            self.color_combo.setEditText("")
+            self.color_combo.blockSignals(False)
+            self._update_naming_rule_preview()
+        else:
+            self._on_sku_changed(self.sku_combo.currentText())
+        self.statusBar().showMessage("SKU 后台数据已更新。", 3000)
+
     def _update_naming_rule_preview(self, _value: str = "") -> None:
         prefix = " ".join(part for part in (
             self.brand_edit.text().strip(),
@@ -871,7 +940,7 @@ class MainWindow(QMainWindow):
             self.template_list.addItem(item)
         self._syncing = False
 
-    def _refresh_photo_list(self) -> None:
+    def _refresh_photo_list(self, cached_only: bool = False) -> None:
         self.photo_list.blockSignals(True)
         self.photo_list.clear()
         for photo in self.photos:
@@ -880,8 +949,10 @@ class MainWindow(QMainWindow):
             item.setSizeHint(QSize(0, 64))
             try:
                 # 左侧图标只能缩放副本，不能破坏中央大预览使用的缓存。
-                thumb = self._thumbnail(photo.path).copy()
-                thumb.thumbnail((42, 42))
+                source = self.thumbnail_cache.get(photo.path) if cached_only else self._thumbnail(photo.path)
+                thumb = source.copy() if source is not None else None
+                if thumb is not None:
+                    thumb.thumbnail((42, 42))
             except Exception:
                 thumb = None
             self.photo_list.addItem(item)
@@ -966,20 +1037,10 @@ class MainWindow(QMainWindow):
             self._error("无法读取图片", str(error))
 
     def _refresh_size_previews(self) -> None:
-        self.size_preview_selector.blockSignals(True)
-        self.size_preview_selector.clear()
-        current_index = 0
-        preview_templates = [
-            template
-            for template in self.templates
-            if template.id == "original" or template.selected
-        ]
-        for index, template in enumerate(preview_templates):
-            self.size_preview_selector.addItem(template.display_name, template.id)
-            if template.id == self.current_template_id:
-                current_index = index
-        self.size_preview_selector.setCurrentIndex(current_index)
-        self.size_preview_selector.blockSignals(False)
+        if self._size_preview_refresh_timer.isActive():
+            self._size_preview_refresh_timer.stop()
+        scroll_value = self.size_preview_list.horizontalScrollBar().value()
+        self._refresh_size_preview_selector()
         self.size_preview_list.clear()
         if not self.photos:
             return
@@ -990,6 +1051,9 @@ class MainWindow(QMainWindow):
                 size = output_size(source.size, template)
                 aspect = size[0] / size[1]
                 preview = source.crop(crop_box(source.size, aspect, photo.crop(template.id))).copy()
+                # 缩略图仅用于界面展示，先缩小再叠加水印即可保持最终效果的相对
+                # 尺寸和位置，避免在 2K 预览图上反复进行昂贵的水印合成。
+                preview.thumbnail((132, 100), Image.Resampling.LANCZOS)
                 # 缩略图同样叠加当前尺寸水印，便于识别最终交付效果。
                 preview = paste_watermark(preview, self.watermark_path, photo.watermark(template.id))
                 preview.thumbnail((66, 50), Image.Resampling.LANCZOS)
@@ -1008,10 +1072,37 @@ class MainWindow(QMainWindow):
         except Exception:
             self.size_preview_list.clear()
             return
+        # clear()/重建列表会将滚动条复位；等待 Qt 更新范围后恢复用户原位置。
+        QTimer.singleShot(0, lambda value=scroll_value: self._restore_size_preview_scroll(value))
+
+    def _refresh_size_preview_selector(self) -> None:
+        """刷新尺寸下拉框，不触发任何图片读取。"""
+        self.size_preview_selector.blockSignals(True)
+        self.size_preview_selector.clear()
+        current_index = 0
+        preview_templates = [
+            template
+            for template in self.templates
+            if template.id == "original" or template.selected
+        ]
+        for index, template in enumerate(preview_templates):
+            self.size_preview_selector.addItem(template.display_name, template.id)
+            if template.id == self.current_template_id:
+                current_index = index
+        self.size_preview_selector.setCurrentIndex(current_index)
+        self.size_preview_selector.blockSignals(False)
+
+    def _restore_size_preview_scroll(self, value: int) -> None:
+        bar = self.size_preview_list.horizontalScrollBar()
+        bar.setValue(max(bar.minimum(), min(value, bar.maximum())))
 
     def _on_photo_changed(self, row: int) -> None:
         if row >= 0:
             self.current_photo_index = row
+            photo = self.current_photo()
+            if self.startup_worker and photo and photo.path not in self.thumbnail_cache:
+                self.statusBar().showMessage(f"正在后台加载：{photo.filename}")
+                return
             self._refresh_all()
 
     def set_current_template(self, template_id: str) -> None:
@@ -1134,10 +1225,68 @@ class MainWindow(QMainWindow):
             requested_template = data.get("current_template_id", "original")
             available_templates = {template.id for template in self.templates}
             self.current_template_id = requested_template if requested_template in available_templates else self.templates[0].id
+            # 会话中的活动预设名称是权威来源。启动时立即套用其定位、尺寸、
+            # 透明度等参数，避免界面显示已选预设但实际仍使用旧的照片参数。
+            self._restore_active_watermark_preset()
         except (KeyError, TypeError, ValueError):
             return
 
+    def _start_restored_session_loading(self) -> None:
+        """在窗口显示后后台解码上次会话图片，当前照片优先。"""
+        if not self.photos or self.startup_worker is not None:
+            return
+        current_path = self.current_photo().path if self.current_photo() else ""
+        paths = [photo.path for photo in self.photos]
+        if current_path in paths:
+            paths.remove(current_path)
+            paths.insert(0, current_path)
+        self.startup_worker = ImportWorker(paths)
+        self.startup_worker.thumbnail_ready.connect(self._on_startup_thumbnail_ready)
+        self.startup_worker.progress.connect(self._on_startup_loading_progress)
+        self.startup_worker.completed.connect(self._on_startup_loading_completed)
+        self.startup_worker.cancelled.connect(self._on_startup_loading_completed)
+        self.startup_worker.finished.connect(self._on_startup_worker_finished)
+        self.startup_worker.start()
+
+    def _on_startup_thumbnail_ready(self, path: str, thumbnail: Image.Image) -> None:
+        """逐张填充缓存和左侧图标；当前照片就绪后立即显示中央画布。"""
+        self.thumbnail_cache[path] = thumbnail
+        for row, photo in enumerate(self.photos):
+            if photo.path != path:
+                continue
+            content = self.photo_list.itemWidget(self.photo_list.item(row))
+            label = content.findChild(QLabel, "photoThumbnail") if content else None
+            if label:
+                small = thumbnail.copy()
+                small.thumbnail((42, 42))
+                label.setPixmap(pil_to_pixmap(small))
+            break
+        current = self.current_photo()
+        if current and current.path == path:
+            self._refresh_canvas()
+
+    def _on_startup_loading_progress(self, current: int, total: int, path: str) -> None:
+        self.statusBar().showMessage(f"正在后台恢复照片 {current}/{total}：{Path(path).name}")
+
+    def _on_startup_loading_completed(self, result: ImportResult) -> None:
+        """全部缩略图就绪后再生成底部构图预览。"""
+        for path, thumbnail in result.thumbnails:
+            self.thumbnail_cache[path] = thumbnail
+        self._refresh_all()
+        if result.failed_paths:
+            self.statusBar().showMessage(f"任务已恢复，{len(result.failed_paths)} 张照片读取失败。", 5000)
+        else:
+            self.statusBar().showMessage(f"已恢复上次任务：{len(result.thumbnails)} 张照片。", 3000)
+
+    def _on_startup_worker_finished(self) -> None:
+        if self.startup_worker:
+            self.startup_worker.deleteLater()
+        self.startup_worker = None
+
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if self.startup_worker and self.startup_worker.isRunning():
+            self.startup_worker.cancel()
+            self.startup_worker.wait(2000)
         self._save_last_session()
         super().closeEvent(event)
 
@@ -1288,13 +1437,16 @@ class MainWindow(QMainWindow):
 
     # ---------- 裁剪交互 ----------
     def _on_canvas_crop_changed(self) -> None:
-        self._sync_crop_controls(); self._refresh_size_previews(); self._refresh_photo_statuses()
+        self._sync_crop_controls()
+        self._refresh_photo_statuses()
+        # 底部缩略图需要对每张图片执行裁剪和水印合成；等待拖动停止后只做一次。
+        self._size_preview_refresh_timer.start()
 
     def _sync_crop_controls(self) -> None:
         photo = self.current_photo()
         self._syncing = True
-        editing_enabled = photo is not None and not self.crop_result_preview_check.isChecked()
-        self.crop_result_preview_check.setEnabled(photo is not None)
+        editing_enabled = photo is not None and not self.canvas.is_result_preview()
+        self.restore_composition_preview_button.setEnabled(photo is not None and self.canvas.is_result_preview())
         for widget in (self.zoom_control, self.x_slider, self.y_slider, *self._crop_edit_controls):
             widget.setEnabled(editing_enabled)
         if photo:
@@ -1303,43 +1455,50 @@ class MainWindow(QMainWindow):
             self.x_slider.setValue(round(crop.offset_x * 100)); self.y_slider.setValue(round(crop.offset_y * 100)); self.guide_check.setChecked(crop.guide_enabled)
         self._syncing = False
 
-    def _toggle_crop_result_preview(self, checked: bool) -> None:
-        """仅切换中央画布的显示模式，不写入照片或导出参数。"""
-        self.canvas.set_result_preview(checked)
+    def _show_crop_result_preview(self) -> None:
+        """双击画布，在默认构图和裁剪后成图预览之间循环切换。"""
+        if not self.current_photo():
+            return
+        self.canvas.set_result_preview(not self.canvas.is_result_preview())
         self._sync_crop_controls()
-        self._refresh_canvas()
+
+    def _restore_default_composition_preview(self) -> None:
+        """返回默认构图编辑预览，不改动任何裁剪参数。"""
+        self.canvas.set_result_preview(False)
+        self._sync_crop_controls()
 
     def _on_zoom_control(self, value: float) -> None:
-        if self._syncing or self.crop_result_preview_check.isChecked() or not self.current_photo(): return
+        if self._syncing or self.canvas.is_result_preview() or not self.current_photo(): return
         self.canvas.set_zoom_from_center(value)
 
     def _on_position_slider(self, axis: str, value: int) -> None:
-        if self._syncing or self.crop_result_preview_check.isChecked() or not self.current_photo(): return
+        if self._syncing or self.canvas.is_result_preview() or not self.current_photo(): return
         setattr(self.current_photo().crop(self.current_template_id), f"offset_{axis}", value / 100)
-        self._refresh_canvas(); self._refresh_size_previews()
+        self._refresh_canvas()
+        self._size_preview_refresh_timer.start()
 
     def _on_quality_changed(self, value: float) -> None:
         if not self._syncing:
             self.export_settings.jpg_quality = round(value)
 
     def _toggle_guides(self, checked: bool) -> None:
-        if not self._syncing and not self.crop_result_preview_check.isChecked() and self.current_photo():
+        if not self._syncing and not self.canvas.is_result_preview() and self.current_photo():
             self.current_photo().crop(self.current_template_id).guide_enabled = checked
             self._refresh_canvas()
 
     def nudge_crop(self, x: int, y: int) -> None:
-        if not self.crop_result_preview_check.isChecked() and self.current_photo():
+        if not self.canvas.is_result_preview() and self.current_photo():
             self._push_undo_state()
             self.canvas.nudge_frame(x, y)
 
     def auto_center(self) -> None:
-        if self.crop_result_preview_check.isChecked() or not self.current_photo(): return
+        if self.canvas.is_result_preview() or not self.current_photo(): return
         self._push_undo_state()
         crop = self.current_photo().crop(self.current_template_id); crop.zoom = 1; crop.offset_x = crop.offset_y = 0
         self._refresh_all()
 
     def quick_position(self, vertical: float) -> None:
-        if not self.crop_result_preview_check.isChecked() and self.current_photo(): self._push_undo_state(); self.current_photo().crop(self.current_template_id).offset_y = vertical; self._refresh_all()
+        if not self.canvas.is_result_preview() and self.current_photo(): self._push_undo_state(); self.current_photo().crop(self.current_template_id).offset_y = vertical; self._refresh_all()
 
     def copy_crop_to_all(self) -> None:
         photo = self.current_photo()
@@ -1370,8 +1529,19 @@ class MainWindow(QMainWindow):
         self.watermark_combo.setEnabled(photo is not None)
         self.watermark_combo.blockSignals(True)
         self.watermark_combo.clear()
-        self.watermark_combo.addItem(Path(self.watermark_path).name if self.watermark_path else "未选择水印", "current")
-        for name in sorted(self.presets.get("watermarks", {})):
+        watermark_presets = self.presets.get("watermarks", {})
+        active_preset_exists = (
+            isinstance(watermark_presets, dict)
+            and self.active_watermark_preset in watermark_presets
+        )
+        # 已选中预设时，文件名只是该预设包含的资源，不应再作为一条水印
+        # 重复显示；仅在使用未保存的临时水印时显示当前文件名。
+        if not active_preset_exists:
+            self.watermark_combo.addItem(
+                Path(self.watermark_path).name if self.watermark_path else "未选择水印",
+                "current",
+            )
+        for name in sorted(watermark_presets if isinstance(watermark_presets, dict) else {}):
             self.watermark_combo.addItem(name, f"preset:{name}")
         self.watermark_combo.addItem("选择透明 PNG 水印…", "choose")
         self.watermark_combo.addItem("编辑水印…", "edit")
@@ -1411,6 +1581,35 @@ class MainWindow(QMainWindow):
         self.active_watermark_preset = name
         self._apply_current_watermark_to_all_outputs()
         self._refresh_all()
+
+    def _restore_active_watermark_preset(self) -> None:
+        """启动恢复时以活动预设校准水印参数，同时保留任务原有的启用状态。"""
+        watermark_presets = self.presets.get("watermarks", {})
+        if not isinstance(watermark_presets, dict):
+            self.active_watermark_preset = ""
+            return
+        data = watermark_presets.get(self.active_watermark_preset)
+        if not isinstance(data, dict):
+            self.active_watermark_preset = ""
+            return
+        settings_data = data.get("settings", data)
+        if not isinstance(settings_data, dict):
+            self.active_watermark_preset = ""
+            return
+        try:
+            preset_settings = WatermarkSettings.from_dict(settings_data)
+        except TypeError:
+            self.active_watermark_preset = ""
+            return
+        preset_path = data.get("watermark_path")
+        if isinstance(preset_path, str) and Path(preset_path).is_file():
+            self.watermark_path = preset_path
+        for photo in self.photos:
+            for template in self.templates:
+                enabled = photo.watermark(template.id).enabled
+                restored = copy.deepcopy(preset_settings)
+                restored.enabled = enabled
+                photo.watermark_by_template[template.id] = restored
 
     def _on_watermark_enabled(self, checked: bool) -> None:
         """将水印开关同步到本任务的全部照片和尺寸。"""
@@ -1526,11 +1725,13 @@ class MainWindow(QMainWindow):
         if not photo: return
         name, ok = QInputDialog.getText(self, "保存水印预设", "预设名称")
         if ok and name.strip():
-            self.presets.setdefault("watermarks", {})[name.strip()] = {
+            preset_name = name.strip()
+            self.presets.setdefault("watermarks", {})[preset_name] = {
                 "settings": photo.watermark(self.current_template_id).to_dict(),
                 "watermark_path": self.watermark_path,
             }
-            save_presets(self.presets); self._sync_watermark_controls(); self.statusBar().showMessage(f"已保存水印预设：{name.strip()}", 3000)
+            self.active_watermark_preset = preset_name
+            save_presets(self.presets); self._sync_watermark_controls(); self.statusBar().showMessage(f"已保存水印预设：{preset_name}", 3000)
 
     def save_naming_preset(self) -> None:
         name, ok = QInputDialog.getText(self, "保存命名预设", "预设名称")
@@ -1649,12 +1850,16 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, title, message)
 
 
+def _resource_path(relative_path: str) -> Path:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_dir / relative_path
+
+
 def _load_stylesheet() -> str:
     """从源码目录或 PyInstaller 的运行目录加载基础主题与玻璃层级覆盖。"""
-    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     theme_paths = (
-        base_dir / "resources" / "styles" / "nuphy_dark_orange.qss",
-        base_dir / "resources" / "styles" / "nuphy_glass_dark.qss",
+        _resource_path("resources/styles/nuphy_dark_orange.qss"),
+        _resource_path("resources/styles/nuphy_glass_dark.qss"),
     )
     try:
         return "\n\n".join(path.read_text(encoding="utf-8") for path in theme_paths)
@@ -1667,6 +1872,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("ImageFlow")
     app.setOrganizationName("NuPhy")
+    app.setWindowIcon(QIcon(str(_resource_path("resources/imageflow-logo.ico"))))
     app.setStyle("Fusion")
     app.setStyleSheet(_load_stylesheet())
     window = MainWindow()

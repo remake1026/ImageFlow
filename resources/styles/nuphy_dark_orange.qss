@@ -20,6 +20,48 @@ QMainWindow { background: #121212; }
 QWidget { background: #181818; }
 QWidget:disabled { color: #5F5F5F; }
 
+/* Photoshop 风格的单排深色自定义标题栏。 */
+QFrame#customTitleBar {
+    background: #2A2B2D;
+    border: none;
+    border-bottom: 1px solid #101112;
+}
+QLabel#titleBarLogo { background: transparent; }
+QLabel#titleBarBrand {
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 600;
+    background: transparent;
+}
+QPushButton#titleBarMenuButton {
+    min-width: 78px;
+    min-height: 30px;
+    padding: 0 10px;
+    color: #E5E5E5;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+}
+QPushButton#titleBarMenuButton:hover,
+QPushButton#titleBarMenuButton:pressed {
+    color: #FFFFFF;
+    background: #44464A;
+}
+QPushButton#titleBarWindowButton {
+    padding: 0;
+    margin: 0;
+    color: #E5E5E5;
+    font-family: "Segoe UI Symbol", "Microsoft YaHei UI";
+    font-size: 16px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+QPushButton#titleBarWindowButton:hover { color: #FFFFFF; background: #44464A; }
+QPushButton#titleBarWindowButton:pressed { background: #55575B; }
+QPushButton#titleBarWindowButton[windowRole="close"]:hover { background: #C42B1C; }
+QPushButton#titleBarWindowButton[windowRole="close"]:pressed { background: #A82418; }
+
 QToolTip {
     color: #F5F5F5;
     background: #252525;
@@ -240,6 +282,14 @@ QPushButton#primaryButton[footerButton="true"] { min-height: 49px; max-height: 4
 QPushButton#secondaryButton, QToolButton#secondaryToolButton { color: #D8D8D8; background: #252525; }
 QPushButton#secondaryButton:hover, QToolButton#secondaryToolButton:hover { background: #2F2F2F; color: #F5F5F5; }
 QPushButton#dangerButton:hover { color: #FFFFFF; background: #D65C5C; border-color: #D65C5C; }
+QPushButton#primaryCompactButton {
+    min-height: 36px;
+    color: #FFFFFF;
+    font-weight: 600;
+    background: #F59A23;
+    border-color: rgba(255,180,80,0.55);
+}
+QPushButton#primaryCompactButton:hover { background: #FFAA33; }
 
 QLineEdit, QComboBox, QAbstractSpinBox {
     min-height: 36px;
@@ -337,3 +387,49 @@ QStatusBar::item { border: none; }
 QDialog, QMessageBox, QInputDialog, QProgressDialog { background: #181818; }
 QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel, QProgressDialog QLabel { color: #B9B9B9; background: transparent; }
 QDialogButtonBox QPushButton { min-width: 76px; }
+
+/* 管理后台 */
+QLabel#managementTitle {
+    color: #FFFFFF;
+    font-size: 22px;
+    font-weight: 700;
+}
+QLabel#managementSubtitle, QLabel#managementHint { color: #8A8A8A; }
+QLabel#managementSectionTitle {
+    color: #F5F5F5;
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#managementMeta { color: #A6A6A6; }
+QFrame#managementCard {
+    background: #1E1E1E;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+}
+QTreeWidget#skuManagementTree {
+    color: #E6E6E6;
+    background: #181818;
+    alternate-background-color: #1B1B1B;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    outline: none;
+}
+QTreeWidget#skuManagementTree::item {
+    min-height: 32px;
+    padding: 2px 7px;
+    border-bottom: 1px solid rgba(255,255,255,0.035);
+}
+QTreeWidget#skuManagementTree::item:hover { background: #252525; }
+QTreeWidget#skuManagementTree::item:selected {
+    color: #FFFFFF;
+    background: rgba(245,154,35,0.26);
+}
+QTreeWidget#skuManagementTree QHeaderView::section {
+    min-height: 32px;
+    padding: 0 8px;
+    color: #B9B9B9;
+    background: #252525;
+    border: none;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}

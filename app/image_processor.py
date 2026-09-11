@@ -1,6 +1,10 @@
 """Pillow 图片读取、无损裁剪与水印合成。预览和导出共用同一套几何计算。"""
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -123,8 +127,90 @@ def pil_to_pixmap(image: Image.Image) -> QPixmap:
     return QPixmap.fromImage(qimage.copy())
 
 
-def load_thumbnail(path: str, max_edge: int = 2048) -> Image.Image:
-    with open_oriented(path) as image:
-        preview = image.convert("RGBA")
+def thumbnail_cache_root() -> Path:
+    """返回只用于 ImageFlow 图片预览的本地缓存目录。"""
+    local_root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+    return local_root / "NuPhy" / "ImageFlow" / "thumbnail-cache"
+
+
+def thumbnail_cache_info() -> tuple[int, int]:
+    """返回缓存文件数量与总字节数；损坏或临时文件也计入可清理范围。"""
+    root = thumbnail_cache_root()
+    if not root.is_dir():
+        return 0, 0
+    files = [item for item in root.iterdir() if item.is_file()]
+    total_bytes = 0
+    for item in files:
+        try:
+            total_bytes += item.stat().st_size
+        except OSError:
+            continue
+    return len(files), total_bytes
+
+
+def clear_thumbnail_cache() -> tuple[int, int]:
+    """仅删除 ImageFlow 预览缓存，返回成功删除的数量和字节数。"""
+    root = thumbnail_cache_root()
+    if not root.is_dir():
+        return 0, 0
+    removed_count = 0
+    removed_bytes = 0
+    for item in root.iterdir():
+        if not item.is_file():
+            continue
+        try:
+            size = item.stat().st_size
+            item.unlink()
+            removed_count += 1
+            removed_bytes += size
+        except OSError:
+            continue
+    try:
+        root.rmdir()
+    except OSError:
+        pass
+    return removed_count, removed_bytes
+
+
+def _thumbnail_cache_path(path: str, max_edge: int) -> Path:
+    """按源文件版本生成持久化预览缓存路径。"""
+    source = Path(path)
+    stat = source.stat()
+    signature = (
+        f"v2|{source.resolve(strict=False)}|{stat.st_size}|{stat.st_mtime_ns}|{max_edge}"
+    ).encode("utf-8", errors="surrogatepass")
+    return thumbnail_cache_root() / f"{hashlib.sha256(signature).hexdigest()}.webp"
+
+
+def load_thumbnail(path: str, max_edge: int = 1600) -> Image.Image:
+    """读取界面预览；后续启动优先复用磁盘缓存，不再重复解码大图。"""
+    cache_path = _thumbnail_cache_path(path, max_edge)
+    try:
+        with Image.open(cache_path) as cached:
+            return cached.convert("RGBA").copy()
+    except (OSError, ValueError):
+        pass
+
+    # JPEG 可在解码阶段直接降采样，比先完整解码数千万像素再缩小明显更快。
+    with Image.open(path) as image:
+        if (image.format or "").upper() in {"JPEG", "MPO"}:
+            image.draft("RGB", (max_edge, max_edge))
+        oriented = ImageOps.exif_transpose(image)
+        preview = oriented.convert("RGBA")
         preview.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
-        return preview.copy()
+        result = preview.copy()
+
+    # 缓存失败不能影响正常导入。临时文件使用进程和线程编号，避免并行导入冲突。
+    temp_path = cache_path.with_name(
+        f"{cache_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.webp"
+    )
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        result.save(temp_path, format="WEBP", quality=88, method=0)
+        temp_path.replace(cache_path)
+    except OSError:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return result
