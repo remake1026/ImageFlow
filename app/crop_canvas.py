@@ -16,6 +16,7 @@ class CropCanvas(QWidget):
     crop_changed = Signal()
     watermark_changed = Signal()
     restore_requested = Signal()
+    result_preview_requested = Signal()
     edit_started = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -27,6 +28,7 @@ class CropCanvas(QWidget):
         self._template: Optional[SizeTemplate] = None
         self._crop: Optional[CropSettings] = None
         self._watermark: Optional[WatermarkSettings] = None
+        self._watermark_path = ""
         self._drag_mode = ""
         self._last_pos = QPoint()
         self._frame = QRectF()
@@ -45,7 +47,11 @@ class CropCanvas(QWidget):
     ) -> None:
         self._pixmap = pil_to_pixmap(image)
         self._template, self._crop, self._watermark = template, crop, watermark
-        self._watermark_pixmap = QPixmap(watermark_path) if watermark_path and Path(watermark_path).is_file() else QPixmap()
+        # 拖动裁剪框时会频繁刷新画布。水印文件未变时复用已经解码的 QPixmap，
+        # 避免每一帧都从磁盘读取、解码 PNG。
+        if watermark_path != self._watermark_path:
+            self._watermark_path = watermark_path
+            self._watermark_pixmap = QPixmap(watermark_path) if watermark_path and Path(watermark_path).is_file() else QPixmap()
         self.update()
 
     def set_result_preview(self, enabled: bool) -> None:
@@ -257,8 +263,15 @@ class CropCanvas(QWidget):
         super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if not self._result_preview and self._frame.contains(event.position()):
-            self.restore_requested.emit()
+        # 编辑状态下需在裁剪框内双击进入成图预览；成图预览状态下再次
+        # 双击画布即可返回编辑状态，形成可反复切换的预览循环。
+        if event.button() == Qt.MouseButton.LeftButton and (
+            self._result_preview or self._frame.contains(event.position())
+        ):
+            self.result_preview_requested.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._result_preview or not self._crop or not self._frame.contains(event.position()):

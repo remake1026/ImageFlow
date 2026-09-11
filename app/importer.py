@@ -21,6 +21,7 @@ class ImportWorker(QThread):
     """在后台读取并校正图片方向，同时生成预览缩略图。"""
 
     progress = Signal(int, int, str)
+    thumbnail_ready = Signal(str, object)
     completed = Signal(object)
     cancelled = Signal(object)
 
@@ -41,7 +42,9 @@ class ImportWorker(QThread):
                 self.cancelled.emit(ImportResult(thumbnails, failed_paths))
                 return
             try:
-                thumbnails.append((path, load_thumbnail(path)))
+                thumbnail = load_thumbnail(path)
+                thumbnails.append((path, thumbnail))
+                self.thumbnail_ready.emit(path, thumbnail)
             except Exception:
                 failed_paths.append(path)
             self.progress.emit(current, total, path)
