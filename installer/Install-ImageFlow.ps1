@@ -1,7 +1,7 @@
 ﻿Add-Type -AssemblyName System.Windows.Forms
 
 $ErrorActionPreference = 'Stop'
-$appName = 'ImageFlow 图片交付助手'
+$appName = 'ImageFlow'
 $sourceApp = Join-Path $PSScriptRoot 'app'
 
 if (-not (Test-Path -LiteralPath $sourceApp)) {

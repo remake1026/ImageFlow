@@ -1,5 +1,5 @@
 /*
-   ImageFlow 图片交付助手 · 深灰黑 / 品牌橙主题
+   ImageFlow · 深灰黑 / 品牌橙主题
    Palette (QSS 不支持原生变量，所有主题色仅在本文件维护):
    --accent: #F59A23; --accent-hover: #FFAA33; --accent-pressed: #E28712;
    --app-bg: #121212; --surface: #181818; --card: #1E1E1E;

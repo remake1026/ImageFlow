@@ -1,1 +1,1 @@
-"""ImageFlow 图片交付助手应用包。"""
+"""ImageFlow 应用包。"""
