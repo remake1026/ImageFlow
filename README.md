@@ -35,11 +35,11 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
 
 ### 方式一：使用安装包（推荐）
 
-1. 点击直接下载 [安装包（59.2 MB）](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/NuPhy图片交付助手-安装包.zip)。
+1. 点击直接下载 [ImageFlow 安装包](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-Installer.zip)。
 2. 在下载完成的 ZIP 文件上单击右键，选择“全部提取…”。请先完整解压，**不要在压缩包内直接运行**。
 3. 打开解压后的文件夹，双击 `Install.bat`。
 4. 在弹出的“选择安装位置”窗口中选择需要安装的磁盘或文件夹，例如 `D:\软件`；安装程序会自动创建应用文件夹。
-5. 看到“安装完成”提示后，双击桌面的“NuPhy 图片交付助手”快捷方式即可启动 ImageFlow。
+5. 看到“安装完成”提示后，双击桌面的“ImageFlow”快捷方式即可启动。
 
 > 因安装包尚未进行数字签名，Windows 可能显示安全提示。请确认安装包来自本 GitHub 仓库后，按“更多信息”→“仍要运行”继续。
 
@@ -75,7 +75,7 @@ build.bat
 也可使用当前 PyInstaller 配置：
 
 ```bat
-py -3.11 -m PyInstaller --noconfirm --clean "NuPhy图片交付助手.spec"
+py -3.11 -m PyInstaller --noconfirm --clean "ImageFlow.spec"
 ```
 
 > `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 内的安装包会被保留并提交到仓库。

@@ -1,4 +1,4 @@
-"""NuPhy 图片交付助手入口。Python 3.11 + PySide6 + Pillow。"""
+"""ImageFlow 入口。Python 3.11 + PySide6 + Pillow。"""
 from __future__ import annotations
 
 import copy
@@ -1858,8 +1858,8 @@ def _resource_path(relative_path: str) -> Path:
 def _load_stylesheet() -> str:
     """从源码目录或 PyInstaller 的运行目录加载基础主题与玻璃层级覆盖。"""
     theme_paths = (
-        _resource_path("resources/styles/nuphy_dark_orange.qss"),
-        _resource_path("resources/styles/nuphy_glass_dark.qss"),
+        _resource_path("resources/styles/imageflow_dark_orange.qss"),
+        _resource_path("resources/styles/imageflow_glass_dark.qss"),
     )
     try:
         return "\n\n".join(path.read_text(encoding="utf-8") for path in theme_paths)

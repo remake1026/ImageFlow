@@ -13,13 +13,13 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean "NuPhy图片交付助手.spec"
+%PYTHON_CMD% -m PyInstaller --noconfirm --clean "ImageFlow.spec"
 if errorlevel 1 (
   echo 打包失败，请查看上方错误信息。
   pause
   exit /b 1
 )
-copy /Y "products.csv" "dist\NuPhy图片交付助手\products.csv" >nul
+copy /Y "products.csv" "dist\ImageFlow\products.csv" >nul
 echo.
-echo 打包完成：dist\NuPhy图片交付助手\NuPhy图片交付助手.exe
+echo 打包完成：dist\ImageFlow\ImageFlow.exe
 pause

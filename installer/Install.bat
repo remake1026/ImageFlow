@@ -1,4 +1,4 @@
 @echo off
 setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-NuPhy.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-ImageFlow.ps1"
 if errorlevel 1 pause
