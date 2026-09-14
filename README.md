@@ -35,15 +35,20 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
 
 ### 方式一：使用安装包（推荐）
 
-1. 点击直接下载 [ImageFlow 安装包](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-Installer.zip)。
-2. 在下载完成的 ZIP 文件上单击右键，选择“全部提取…”。请先完整解压，**不要在压缩包内直接运行**。
-3. 打开解压后的文件夹，双击 `Install.bat`。
-4. 在弹出的“选择安装位置”窗口中选择需要安装的磁盘或文件夹，例如 `D:\软件`；安装程序会自动创建应用文件夹。
-5. 看到“安装完成”提示后，双击桌面的“ImageFlow”快捷方式即可启动。
+**支持 Windows 10 1809 及以上、Windows 11（64 位），无需安装 Python。**
+
+1. 下载 [ImageFlow 1.1.0 安装程序（EXE）](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-1.1.0-Win10-11-Setup.exe)，双击打开中文安装向导。
+2. 点击“下一步”，选择安装位置，例如 `D:\软件\ImageFlow`。
+3. 选择是否创建**桌面快捷方式**和**开始菜单快捷方式**，首次安装均默认勾选，可以取消。
+4. 点击“安装”，完成后可勾选“运行 ImageFlow”，再点击“完成”。
+
+也可下载 [ZIP 版安装包](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-Installer.zip)，解压后运行其中的 EXE。
 
 > 因安装包尚未进行数字签名，Windows 可能显示安全提示。请确认安装包来自本 GitHub 仓库后，按“更多信息”→“仍要运行”继续。
 
-**更新已有安装：** 再次运行同一安装包，选择原先的父目录，并在更新提示中选择“是”即可。
+**更新：** 先退出 ImageFlow，再运行新版安装包，选择原安装目录（包含 `ImageFlow.exe` 的文件夹）。
+
+**卸载：** Windows“设置 → 应用 → ImageFlow → 卸载”，或运行安装目录中的 `Uninstall.exe`。
 
 ### 方式二：从源码运行（适合开发或希望自行更新）
 
@@ -66,19 +71,23 @@ py -3.11 main.py
 
 ## 开发与打包
 
-项目使用 Python、PySide6、Pillow 和 PyInstaller。
+项目使用 Python、PySide6、Pillow、PyInstaller 和 [NSIS 3](https://nsis.sourceforge.io/Download)。Windows x64 发行构建采用 Python 3.14，依赖固定在 `installer/requirements-build.txt`，Qt 限制在支持 Windows 10 的版本范围内。
 
 ```bat
 build.bat
 ```
 
-也可使用当前 PyInstaller 配置：
+也可分步构建：
 
 ```bat
-py -3.11 -m PyInstaller --noconfirm --clean "ImageFlow.spec"
+py -3.14 -m pip install -r installer/requirements-build.txt
+py -3.14 -m PyInstaller --noconfirm --clean "ImageFlow.spec"
+py -3.14 installer/build_installer.py
 ```
 
 > `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 内的安装包会被保留并提交到仓库。
+
+输出：`releases/ImageFlow-1.1.0-Win10-11-Setup.exe`、兼容旧下载链接的 `ImageFlow-Installer.zip` 和 `SHA256SUMS.txt`。如 NSIS 不在 PATH，可给构建脚本传入 `--makensis C:\路径\makensis.exe`。静默安装参数见 [安装说明](installer/README.txt)。
 
 ## 项目结构
 

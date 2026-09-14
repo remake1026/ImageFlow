@@ -7,7 +7,7 @@ if errorlevel 1 (
 ) else (
   set "PYTHON_CMD=py -3"
 )
-%PYTHON_CMD% -m pip install -r requirements.txt
+%PYTHON_CMD% -m pip install -r installer\requirements-build.txt
 if errorlevel 1 (
   echo 依赖安装失败，无法打包。
   pause
@@ -19,7 +19,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-copy /Y "products.csv" "dist\ImageFlow\products.csv" >nul
+%PYTHON_CMD% installer\build_installer.py
+if errorlevel 1 (
+  echo 安装包生成失败，请确认已安装 NSIS 3。
+  pause
+  exit /b 1
+)
 echo.
-echo 打包完成：dist\ImageFlow\ImageFlow.exe
+echo 打包完成：releases\ImageFlow-1.1.0-Win10-11-Setup.exe
 pause

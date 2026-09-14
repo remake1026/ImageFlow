@@ -1,0 +1,4 @@
+# Validated Windows x64 release toolchain (Python 3.14).
+PySide6==6.11.1
+Pillow==12.3.0
+PyInstaller==6.21.0
