@@ -285,6 +285,10 @@ class SettingsAccordion(QWidget):
         self._expanded[index] = expanded
         self._headers[index].setChecked(expanded)
         self._pages[index].setVisible(expanded)
+        # 可见页面变化后立即让外层滚动区重新计算内容高度，避免首次展开时
+        # 仍沿用折叠前的紧凑尺寸。
+        self._layout.invalidate()
+        self.updateGeometry()
 
     def isItemExpanded(self, index: int) -> bool:
         return 0 <= index < len(self._expanded) and self._expanded[index]
@@ -716,6 +720,9 @@ class MainWindow(QMainWindow):
         self.template_list = QListWidget()
         self.template_list.setObjectName("templateList")
         self.template_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        # 尺寸页初次展开时也应显示足够的列表区域；内容超出时由列表自身滚动。
+        self.template_list.setMinimumHeight(300)
+        self.template_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.template_list.setItemDelegate(TemplateCheckDelegate(self.template_list))
         self.template_list.itemChanged.connect(self._on_template_checked)
         self.template_list.currentItemChanged.connect(self._on_template_selected)
