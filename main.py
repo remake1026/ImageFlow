@@ -25,7 +25,7 @@ from app.anchor_selector import AnchorSelector
 from app.crop_preview_dialog import CropPreviewDialog, create_crop_icon
 from app.management_dialog import ManagementDialog
 from app.watermark_editor_dialog import WatermarkEditorDialog
-from app.exporter import ExportJob, ExportWorker, build_filename
+from app.exporter import ExportJob, ExportWorker, OutputSizeEstimateWorker, build_filename
 from app.importer import ImportResult, ImportWorker
 from app.image_processor import crop_box, load_thumbnail, output_size, paste_watermark, pil_to_pixmap
 from app.models import CropSettings, ExportSettings, PhotoItem, SizeTemplate, WatermarkSettings, builtin_templates
@@ -422,6 +422,13 @@ class MainWindow(QMainWindow):
         self._size_preview_refresh_timer.setSingleShot(True)
         self._size_preview_refresh_timer.setInterval(180)
         self._size_preview_refresh_timer.timeout.connect(self._refresh_size_previews)
+        self._size_estimate_timer = QTimer(self)
+        self._size_estimate_timer.setSingleShot(True)
+        self._size_estimate_timer.setInterval(260)
+        self._size_estimate_timer.timeout.connect(self._start_output_size_estimate)
+        self._size_estimate_request = 0
+        self._estimated_output_bytes: Optional[int] = None
+        self._size_estimate_worker: Optional[OutputSizeEstimateWorker] = None
         self.worker: Optional[ExportWorker] = None
         self._exporting_photos: list[PhotoItem] = []
         self.import_worker: Optional[ImportWorker] = None
@@ -1031,6 +1038,10 @@ class MainWindow(QMainWindow):
         self.overwrite_check = GuideCheckBox("允许覆盖同名文件")
         self.icc_check = GuideCheckBox("保留 ICC 色彩配置"); self.icc_check.setChecked(True)
         self.exif_check = GuideCheckBox("保留 EXIF 信息")
+        self.format_combo.currentTextChanged.connect(lambda _text: self._schedule_output_size_estimate())
+        self.preserve_resolution_check.toggled.connect(lambda _checked: self._schedule_output_size_estimate())
+        self.icc_check.toggled.connect(lambda _checked: self._schedule_output_size_estimate())
+        self.exif_check.toggled.connect(lambda _checked: self._schedule_output_size_estimate())
         form.addRow("JPG/WebP 质量", self.quality_control)
         form.addRow(self.preserve_resolution_check); form.addRow(self.subfolder_check); form.addRow(self.overwrite_check); form.addRow(self.icc_check); form.addRow(self.exif_check)
         layout.addLayout(form)
@@ -1160,14 +1171,87 @@ class MainWindow(QMainWindow):
     def _refresh_canvas(self) -> None:
         photo = self.current_photo()
         if not photo:
+            self._size_estimate_request += 1
+            self._estimated_output_bytes = None
+            self._size_estimate_timer.stop()
             self.canvas.set_content(Image.new("RGBA", (1, 1)), SizeTemplate("empty", "", 1, 1), CropSettings(), "", WatermarkSettings())
             return
         try:
             template = self.current_template()
             self.canvas.set_content(self._thumbnail(photo.path), template, photo.crop(template.id), self.watermark_path, photo.watermark(template.id))
-            self.statusBar().showMessage(f"正在编辑：{photo.filename} · {template.display_name}")
+            self._show_editing_status()
+            self._schedule_output_size_estimate()
         except Exception as error:
             self._error("无法读取图片", str(error))
+
+    @staticmethod
+    def _format_output_size(size_bytes: int) -> str:
+        if size_bytes < 1024 * 1024:
+            return f"{max(1, round(size_bytes / 1024))} KB"
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    def _show_editing_status(self) -> None:
+        photo = self.current_photo()
+        if not photo:
+            return
+        text = f"正在编辑：{photo.filename} · {self.current_template().display_name}"
+        if self._estimated_output_bytes is not None:
+            text += f" · 预计输出大小：{self._format_output_size(self._estimated_output_bytes)}"
+        self.statusBar().showMessage(text)
+
+    def _schedule_output_size_estimate(self) -> None:
+        if not self.current_photo() or not hasattr(self, "quality_control"):
+            return
+        self._size_estimate_request += 1
+        self._estimated_output_bytes = None
+        self._show_editing_status()
+        self._size_estimate_timer.start()
+
+    def _start_output_size_estimate(self) -> None:
+        if self._size_estimate_worker and self._size_estimate_worker.isRunning():
+            self._size_estimate_timer.start()
+            return
+        photo = self.current_photo()
+        if not photo:
+            return
+        template = self.current_template()
+        settings = copy.deepcopy(self.export_settings)
+        settings.image_format = self.format_combo.currentText()
+        settings.jpg_quality = round(self.quality_control.value())
+        settings.preserve_source_resolution = self.preserve_resolution_check.isChecked()
+        settings.keep_icc = self.icc_check.isChecked()
+        settings.keep_exif = self.exif_check.isChecked()
+        request_id = self._size_estimate_request
+        worker = OutputSizeEstimateWorker(
+            request_id,
+            photo.path,
+            copy.deepcopy(template),
+            copy.deepcopy(photo.crop(template.id)),
+            self.watermark_path,
+            copy.deepcopy(photo.watermark(template.id)),
+            settings,
+        )
+        worker.estimated.connect(self._on_output_size_estimated)
+        worker.failed.connect(self._on_output_size_estimate_failed)
+        worker.finished.connect(lambda: self._on_output_size_estimate_finished(worker))
+        self._size_estimate_worker = worker
+        worker.start()
+
+    def _on_output_size_estimated(self, request_id: int, size_bytes: int) -> None:
+        if request_id != self._size_estimate_request:
+            return
+        self._estimated_output_bytes = size_bytes
+        self._show_editing_status()
+
+    def _on_output_size_estimate_failed(self, request_id: int) -> None:
+        if request_id == self._size_estimate_request:
+            self._estimated_output_bytes = None
+            self._show_editing_status()
+
+    def _on_output_size_estimate_finished(self, worker: OutputSizeEstimateWorker) -> None:
+        worker.deleteLater()
+        if self._size_estimate_worker is worker:
+            self._size_estimate_worker = None
 
     def _refresh_size_previews(self) -> None:
         if self._size_preview_refresh_timer.isActive():
@@ -1499,6 +1583,8 @@ class MainWindow(QMainWindow):
         if self.startup_worker and self.startup_worker.isRunning():
             self.startup_worker.cancel()
             self.startup_worker.wait(2000)
+        if self._size_estimate_worker and self._size_estimate_worker.isRunning():
+            self._size_estimate_worker.wait(2000)
         self._save_last_session()
         super().closeEvent(event)
 
@@ -1646,6 +1732,7 @@ class MainWindow(QMainWindow):
     def _on_canvas_crop_changed(self) -> None:
         self._sync_crop_controls()
         self._refresh_photo_statuses()
+        self._schedule_output_size_estimate()
         # 底部缩略图需要对每张图片执行裁剪和水印合成；等待拖动停止后只做一次。
         self._size_preview_refresh_timer.start()
 
@@ -1687,6 +1774,7 @@ class MainWindow(QMainWindow):
     def _on_quality_changed(self, value: float) -> None:
         if not self._syncing:
             self.export_settings.jpg_quality = round(value)
+            self._schedule_output_size_estimate()
 
     def _toggle_guides(self, checked: bool) -> None:
         if not self._syncing and not self.canvas.is_result_preview() and self.current_photo():
@@ -1847,6 +1935,7 @@ class MainWindow(QMainWindow):
 
     def _on_canvas_watermark_changed(self) -> None:
         self._sync_watermark_controls(); self._refresh_size_previews(); self._refresh_photo_statuses()
+        self._schedule_output_size_estimate()
 
     def open_watermark_editor(self) -> None:
         """在独立编辑器中调整水印，实时预览始终基于当前裁剪后的图片。"""
