@@ -520,7 +520,28 @@ class MainWindow(QMainWindow):
         splitter.splitterMoved.connect(lambda _position, _index: self._align_crop_toolbar_to_canvas())
         self.setCentralWidget(splitter)
         QTimer.singleShot(0, self._align_crop_toolbar_to_canvas)
+        self._build_editing_status_bar()
         self.statusBar().showMessage("就绪：导入修图成片后开始制作交付图。")
+
+    def _build_editing_status_bar(self) -> None:
+        """固定编辑状态的说明文字，切图时只更新动态字段，避免整条状态栏闪烁。"""
+        self._editing_status_widget = QWidget()
+        self._editing_status_widget.setObjectName("editingStatus")
+        layout = QHBoxLayout(self._editing_status_widget)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(0)
+        self._editing_photo_label = QLabel()
+        self._editing_template_label = QLabel()
+        self._editing_size_number_label = QLabel("—")
+        for label in (
+            QLabel("正在编辑："), self._editing_photo_label, QLabel(" · "),
+            self._editing_template_label, QLabel(" · 预计输出大小："),
+            self._editing_size_number_label, QLabel(" MB"),
+        ):
+            layout.addWidget(label)
+        layout.addStretch(1)
+        self.statusBar().addWidget(self._editing_status_widget, 1)
+        self._editing_status_widget.hide()
 
     def _align_crop_toolbar_to_canvas(self) -> None:
         """为顶部裁剪工具预留右侧栏空间，使其右缘与画布右缘对齐。"""
@@ -1186,18 +1207,27 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_output_size(size_bytes: int) -> str:
-        if size_bytes < 1024 * 1024:
-            return f"{max(1, round(size_bytes / 1024))} KB"
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
+        """状态栏固定显示 MB 单位，避免单位标签在切图时消失或切换。"""
+        size_mb = size_bytes / (1024 * 1024)
+        return f"{size_mb:.1f}" if size_mb >= 0.1 else f"{size_mb:.3f}"
 
     def _show_editing_status(self) -> None:
         photo = self.current_photo()
         if not photo:
+            self._editing_status_widget.hide()
             return
-        text = f"正在编辑：{photo.filename} · {self.current_template().display_name}"
-        if self._estimated_output_bytes is not None:
-            text += f" · 预计输出大小：{self._format_output_size(self._estimated_output_bytes)}"
-        self.statusBar().showMessage(text)
+        # QStatusBar 的普通组件会在临时提示结束后自动恢复；编辑时清掉旧提示，
+        # 而固定说明文字和单位始终保留，只变动文件名、比例与数值三个字段。
+        self.statusBar().clearMessage()
+        template = self.current_template()
+        if self._editing_photo_label.text() != photo.filename:
+            self._editing_photo_label.setText(photo.filename)
+        if self._editing_template_label.text() != template.display_name:
+            self._editing_template_label.setText(template.display_name)
+        size_text = "—" if self._estimated_output_bytes is None else self._format_output_size(self._estimated_output_bytes)
+        if self._editing_size_number_label.text() != size_text:
+            self._editing_size_number_label.setText(size_text)
+        self._editing_status_widget.show()
 
     def _schedule_output_size_estimate(self) -> None:
         if not self.current_photo() or not hasattr(self, "quality_control"):
