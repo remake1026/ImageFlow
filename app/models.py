@@ -130,9 +130,9 @@ class ExportSettings:
     overwrite: bool = False
     keep_icc: bool = True
     keep_exif: bool = False
-    naming_pattern: str = "{brand} {sku} {color} {original}"
-    brand: str = "NuPhy"
-    sku: str = ""
+    naming_pattern: str = "{brand} {product} {color} {original}"
+    brand: str = ""
+    product: str = ""
     color: str = ""
     date: str = ""
     start_sequence: int | None = None

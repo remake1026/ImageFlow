@@ -425,10 +425,10 @@ class MainWindow(QMainWindow):
         self.startup_worker: Optional[ImportWorker] = None
         self.presets = load_presets()
         self.product_catalog = load_product_catalog()
-        self.recent_color_by_sku: dict[str, str] = {
-            sku: color
-            for sku, color in self.presets.get("recent_color_by_sku", {}).items()
-            if isinstance(sku, str) and isinstance(color, str)
+        self.recent_color_by_product: dict[str, str] = {
+            product: color
+            for product, color in self.presets.get("recent_color_by_product", {}).items()
+            if isinstance(product, str) and isinstance(color, str)
         }
         self.export_settings.output_folder = self.presets.get("last_output", "")
         self._build_ui()
@@ -816,14 +816,14 @@ class MainWindow(QMainWindow):
         form.setContentsMargins(18, 18, 18, 18)
         form.setVerticalSpacing(14)
         form.setHorizontalSpacing(12)
-        self.brand_edit = QLineEdit("NuPhy")
-        self.sku_combo = EditablePopupComboBox()
+        self.brand_edit = QLineEdit()
+        self.product_combo = EditablePopupComboBox()
         self.color_combo = EditablePopupComboBox()
-        self.sku_combo.setObjectName("namingSkuCombo")
+        self.product_combo.setObjectName("namingProductCombo")
         self.color_combo.setObjectName("namingColorCombo")
-        self.sku_combo.setPlaceholderText("选择 SKU")
+        self.product_combo.setPlaceholderText("选择产品")
         self.color_combo.setPlaceholderText("选择颜色")
-        self.sku_combo.addItems(self.product_catalog)
+        self.product_combo.addItems(self.product_catalog)
         self.date_edit = QLineEdit()
         self.date_edit.setObjectName("namingDateEdit")
         self.date_edit.setPlaceholderText("可留空，例如 2026-07-28")
@@ -833,7 +833,7 @@ class MainWindow(QMainWindow):
         self.sequence_spin = OptionalSequenceControl()
         self.replace_original_name_check = GuideCheckBox("是否覆盖原名称")
         self.sequence_spin.value_changed.connect(self._update_naming_rule_preview)
-        form.addRow("品牌", self.brand_edit); form.addRow("SKU", self.sku_combo); form.addRow("颜色", self.color_combo)
+        form.addRow("品牌", self.brand_edit); form.addRow("产品", self.product_combo); form.addRow("颜色", self.color_combo)
         form.addRow("日期", self.date_edit); form.addRow("起始序号", self.sequence_spin)
         form.addRow(self.replace_original_name_check)
         form.addRow("命名预览", self.naming_preview_label)
@@ -843,17 +843,17 @@ class MainWindow(QMainWindow):
         form.addRow(save)
         self.brand_edit.textChanged.connect(self._update_naming_rule_preview)
         self.date_edit.textChanged.connect(self._update_naming_rule_preview)
-        self.sku_combo.currentTextChanged.connect(self._update_naming_rule_preview)
-        self.sku_combo.activated.connect(lambda _index: self._on_sku_changed(self.sku_combo.currentText()))
-        self.sku_combo.lineEdit().editingFinished.connect(lambda: self._on_sku_changed(self.sku_combo.currentText()))
+        self.product_combo.currentTextChanged.connect(self._update_naming_rule_preview)
+        self.product_combo.activated.connect(lambda _index: self._on_product_changed(self.product_combo.currentText()))
+        self.product_combo.lineEdit().editingFinished.connect(lambda: self._on_product_changed(self.product_combo.currentText()))
         self.color_combo.currentTextChanged.connect(self._on_color_changed)
         self.replace_original_name_check.toggled.connect(self._update_naming_rule_preview)
         self._update_naming_rule_preview()
         return page
 
-    def _on_sku_changed(self, sku: str) -> None:
-        colors = self.product_catalog.get(sku.strip(), [])
-        preferred_color = self.recent_color_by_sku.get(sku.strip(), "")
+    def _on_product_changed(self, product: str) -> None:
+        colors = self.product_catalog.get(product.strip(), [])
+        preferred_color = self.recent_color_by_product.get(product.strip(), "")
         current_color = self.color_combo.currentText().strip()
         self.color_combo.blockSignals(True)
         self.color_combo.clear()
@@ -868,16 +868,16 @@ class MainWindow(QMainWindow):
         self._on_color_changed(self.color_combo.currentText())
 
     def _on_color_changed(self, color: str) -> None:
-        sku = self.sku_combo.currentText().strip()
+        product = self.product_combo.currentText().strip()
         selected_color = color.strip()
-        if sku and selected_color and self.recent_color_by_sku.get(sku) != selected_color:
-            self.recent_color_by_sku[sku] = selected_color
-            self.presets["recent_color_by_sku"] = dict(self.recent_color_by_sku)
+        if product and selected_color and self.recent_color_by_product.get(product) != selected_color:
+            self.recent_color_by_product[product] = selected_color
+            self.presets["recent_color_by_product"] = dict(self.recent_color_by_product)
             save_presets(self.presets)
         self._update_naming_rule_preview()
 
     def open_management_dialog(self) -> None:
-        """打开独立管理页面，维护缓存和命名用 SKU。"""
+        """打开独立管理页面，维护缓存和命名用产品。"""
         dialog = ManagementDialog(self.product_catalog, self)
         dialog.catalog_changed.connect(self._on_product_catalog_changed)
         dialog.exec()
@@ -890,27 +890,27 @@ class MainWindow(QMainWindow):
         return super().nativeEvent(event_type, message)
 
     def _on_product_catalog_changed(self, catalog: object) -> None:
-        """后台保存后立即刷新主界面的 SKU/颜色下拉框。"""
+        """后台保存后立即刷新主界面的产品/颜色下拉框。"""
         if not isinstance(catalog, dict):
             return
         previous_catalog = self.product_catalog
-        current_sku = self.sku_combo.currentText().strip()
+        current_product = self.product_combo.currentText().strip()
         cleaned_catalog = {
-            str(sku): [str(color) for color in colors]
-            for sku, colors in catalog.items()
-            if isinstance(sku, str) and isinstance(colors, list)
+            str(product): [str(color) for color in colors]
+            for product, colors in catalog.items()
+            if isinstance(product, str) and isinstance(colors, list)
         }
         self.product_catalog = cleaned_catalog
-        removed_current = current_sku in previous_catalog and current_sku not in cleaned_catalog
-        self.sku_combo.blockSignals(True)
-        self.sku_combo.clear()
-        self.sku_combo.addItems(cleaned_catalog)
-        if current_sku and not removed_current:
-            self.sku_combo.setEditText(current_sku)
+        removed_current = current_product in previous_catalog and current_product not in cleaned_catalog
+        self.product_combo.blockSignals(True)
+        self.product_combo.clear()
+        self.product_combo.addItems(cleaned_catalog)
+        if current_product and not removed_current:
+            self.product_combo.setEditText(current_product)
         else:
-            self.sku_combo.setCurrentIndex(-1)
-            self.sku_combo.setEditText("")
-        self.sku_combo.blockSignals(False)
+            self.product_combo.setCurrentIndex(-1)
+            self.product_combo.setEditText("")
+        self.product_combo.blockSignals(False)
         if removed_current:
             self.color_combo.blockSignals(True)
             self.color_combo.clear()
@@ -919,13 +919,13 @@ class MainWindow(QMainWindow):
             self.color_combo.blockSignals(False)
             self._update_naming_rule_preview()
         else:
-            self._on_sku_changed(self.sku_combo.currentText())
-        self.statusBar().showMessage("SKU 后台数据已更新。", 3000)
+            self._on_product_changed(self.product_combo.currentText())
+        self.statusBar().showMessage("产品数据已更新。", 3000)
 
     def _update_naming_rule_preview(self, _value: str = "") -> None:
         prefix = " ".join(part for part in (
             self.brand_edit.text().strip(),
-            self.sku_combo.currentText().strip(),
+            self.product_combo.currentText().strip(),
             self.color_combo.currentText().strip(),
             self.date_edit.text().strip(),
         ) if part)
@@ -938,7 +938,7 @@ class MainWindow(QMainWindow):
         start_sequence = start_sequence or 1
         preview_settings = copy.copy(self.export_settings)
         preview_settings.brand = self.brand_edit.text().strip()
-        preview_settings.sku = self.sku_combo.currentText().strip()
+        preview_settings.product = self.product_combo.currentText().strip()
         preview_settings.color = self.color_combo.currentText().strip()
         preview_settings.date = self.date_edit.text().strip()
         preview_settings.start_sequence = start_sequence
@@ -978,7 +978,7 @@ class MainWindow(QMainWindow):
         folder_layout.addWidget(folder_label)
         folder_layout.addWidget(browse)
 
-        # 复用 SKU 的固定箭头栏，保持下拉箭头和右侧分割线位置一致。
+        # 复用产品下拉框的固定箭头栏，保持下拉箭头和右侧分割线位置一致。
         self.format_combo = StyledComboBox(); self.format_combo.setObjectName("exportFormatCombo"); self.format_combo.addItems(["JPG", "PNG", "WEBP"])
         format_label = QLabel("格式")
         format_label.setObjectName("exportFieldLabel")
@@ -1949,15 +1949,15 @@ class MainWindow(QMainWindow):
         s = self.export_settings
         s.output_folder = self.output_edit.text().strip(); s.image_format = self.format_combo.currentText(); s.jpg_quality = round(self.quality_control.value())
         s.preserve_source_resolution = self.preserve_resolution_check.isChecked(); s.subfolders = self.subfolder_check.isChecked(); s.overwrite = self.overwrite_check.isChecked(); s.keep_icc = self.icc_check.isChecked(); s.keep_exif = self.exif_check.isChecked()
-        s.brand = self.brand_edit.text().strip(); s.sku = self.sku_combo.currentText().strip(); s.color = self.color_combo.currentText().strip(); s.date = self.date_edit.text().strip(); s.start_sequence = self.sequence_spin.value(); s.replace_original_name = self.replace_original_name_check.isChecked(); s.naming_pattern = "{brand} {sku} {color} {date} {sequence} {original}"
+        s.brand = self.brand_edit.text().strip(); s.product = self.product_combo.currentText().strip(); s.color = self.color_combo.currentText().strip(); s.date = self.date_edit.text().strip(); s.start_sequence = self.sequence_spin.value(); s.replace_original_name = self.replace_original_name_check.isChecked(); s.naming_pattern = "{brand} {product} {color} {date} {sequence} {original}"
 
     def _write_export_controls(self) -> None:
         s = self.export_settings
         self.output_edit.setText(s.output_folder); self.format_combo.setCurrentText(s.image_format); self.quality_control.setValue(s.jpg_quality); self.preserve_resolution_check.setChecked(s.preserve_source_resolution); self.subfolder_check.setChecked(s.subfolders); self.overwrite_check.setChecked(s.overwrite); self.icc_check.setChecked(s.keep_icc); self.exif_check.setChecked(s.keep_exif)
-        self.brand_edit.setText(s.brand or "NuPhy"); self.date_edit.setText(s.date)
-        sku_index = self.sku_combo.findText(s.sku)
-        self.sku_combo.setCurrentIndex(sku_index if sku_index >= 0 else -1)
-        self._on_sku_changed(self.sku_combo.currentText())
+        self.brand_edit.setText(s.brand); self.date_edit.setText(s.date)
+        product_index = self.product_combo.findText(s.product)
+        self.product_combo.setCurrentIndex(product_index if product_index >= 0 else -1)
+        self._on_product_changed(self.product_combo.currentText())
         color_index = self.color_combo.findText(s.color)
         self.color_combo.setCurrentIndex(color_index if color_index >= 0 else -1)
         self.sequence_spin.setValue(s.start_sequence)
@@ -2041,7 +2041,7 @@ class MainWindow(QMainWindow):
     # ---------- 项目文件 ----------
     def save_project(self) -> None:
         self._read_export_controls()
-        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "NuPhy 项目 (*.nuphyproject)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "ImageFlow 项目 (*.imageflowproject)")
         if path:
             try:
                 save_project(path, self.photos, self.templates, self.watermark_path, self.export_settings)
@@ -2049,7 +2049,7 @@ class MainWindow(QMainWindow):
             except Exception as error: self._error("保存项目失败", str(error))
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "NuPhy 项目 (*.nuphyproject)")
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject)")
         if not path: return
         try:
             photos, templates, watermark, settings = load_project(path)
@@ -2094,7 +2094,7 @@ def _load_stylesheet() -> str:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("ImageFlow")
-    app.setOrganizationName("NuPhy")
+    app.setOrganizationName("ImageFlow")
     app.setWindowIcon(QIcon(str(_resource_path("resources/imageflow-logo.ico"))))
     app.setStyle("Fusion")
     app.setStyleSheet(_load_stylesheet())

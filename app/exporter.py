@@ -29,11 +29,11 @@ def build_filename(settings: ExportSettings, template: SizeTemplate, sequence: i
     if settings.replace_original_name:
         # 覆盖原名称时始终输出三位流水号，确保批量导出不会同名。
         sequence_part = f"{sequence:03d}"
-        parts = [settings.brand.strip(), settings.sku.strip(), settings.color.strip(), settings.date.strip(), sequence_part]
+        parts = [settings.brand.strip(), settings.product.strip(), settings.color.strip(), settings.date.strip(), sequence_part]
     else:
         original_name = Path(original_filename).stem
         sequence_part = str(sequence) if settings.start_sequence is not None else ""
-        parts = [settings.brand.strip(), settings.sku.strip(), settings.color.strip(), settings.date.strip(), sequence_part, original_name]
+        parts = [settings.brand.strip(), settings.product.strip(), settings.color.strip(), settings.date.strip(), sequence_part, original_name]
     return safe_filename(" ".join(part for part in parts if part))
 
 

@@ -130,7 +130,7 @@ def pil_to_pixmap(image: Image.Image) -> QPixmap:
 def thumbnail_cache_root() -> Path:
     """返回只用于 ImageFlow 图片预览的本地缓存目录。"""
     local_root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
-    return local_root / "NuPhy" / "ImageFlow" / "thumbnail-cache"
+    return local_root / "ImageFlow" / "thumbnail-cache"
 
 
 def thumbnail_cache_info() -> tuple[int, int]:

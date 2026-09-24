@@ -444,7 +444,7 @@ QFrame#managementCard {
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
 }
-QTreeWidget#skuManagementTree {
+QTreeWidget#productManagementTree {
     color: #E6E6E6;
     background: #181818;
     alternate-background-color: #1B1B1B;
@@ -452,17 +452,17 @@ QTreeWidget#skuManagementTree {
     border-radius: 8px;
     outline: none;
 }
-QTreeWidget#skuManagementTree::item {
+QTreeWidget#productManagementTree::item {
     min-height: 32px;
     padding: 2px 7px;
     border-bottom: 1px solid rgba(255,255,255,0.035);
 }
-QTreeWidget#skuManagementTree::item:hover { background: #252525; }
-QTreeWidget#skuManagementTree::item:selected {
+QTreeWidget#productManagementTree::item:hover { background: #252525; }
+QTreeWidget#productManagementTree::item:selected {
     color: #FFFFFF;
     background: rgba(245,154,35,0.26);
 }
-QTreeWidget#skuManagementTree QHeaderView::section {
+QTreeWidget#productManagementTree QHeaderView::section {
     min-height: 32px;
     padding: 0 8px;
     color: #B9B9B9;

@@ -24,8 +24,8 @@ ENV/
 
 # Generated release archives
 *.zip
-!/releases/
-!/releases/*.zip
+/releases/*.exe
+/releases/SHA256SUMS.txt
 
 # IDE and editor local settings
 .idea/
