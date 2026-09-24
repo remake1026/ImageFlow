@@ -689,7 +689,8 @@ class MainWindow(QMainWindow):
         self.export_all_button = QPushButton("一键导出全部")
         self.export_all_button.setObjectName("primaryButton")
         self.export_all_button.setProperty("footerButton", True)
-        self.export_all_button.clicked.connect(self.start_export)
+        # clicked 会携带 checked 状态；显式无参调用可保证始终导出全部已导入照片。
+        self.export_all_button.clicked.connect(lambda: self.start_export())
         export_footer_layout.addWidget(self.export_all_button)
         self.export_selected_button = QPushButton("导出选中照片")
         self.export_selected_button.setObjectName("secondaryExportButton")
