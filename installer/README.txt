@@ -12,7 +12,7 @@ ImageFlow 1.1.0 安装说明
 更新：先退出 ImageFlow，再运行安装包。新版安装会记住上次路径和选项。
 旧 ZIP 版升级：选中原来包含 ImageFlow.exe 的目录，不要选它的父目录。
 卸载：Windows 设置 → 应用 → ImageFlow → 卸载，或运行 Uninstall.exe。
-卸载保留用户预设、SKU 数据、原图、项目及安装目录内用户自行添加的文件。
+卸载保留用户预设、产品数据、原图、项目及安装目录内用户自行添加的文件。
 
 静默安装（/D 必须放最后，路径不加引号）：
 ImageFlow-1.1.0-Win10-11-Setup.exe /S /DESKTOP=1 /STARTMENU=1 /D=D:\软件\ImageFlow
