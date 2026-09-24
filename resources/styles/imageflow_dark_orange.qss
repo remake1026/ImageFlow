@@ -425,6 +425,16 @@ QDialogButtonBox QPushButton { min-width: 76px; }
 QDialog#customSizeDialog { background: #1E1E1E; }
 QLabel#customSizeFieldLabel { color: #F5F5F5; font-weight: 600; }
 QLabel#customSizeMultiply { min-width: 14px; color: #F5F5F5; font-size: 18px; font-weight: 600; }
+QLineEdit#customSizeNameEdit QToolButton {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 18px;
+    max-height: 18px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
 
 /* 管理后台 */
 QLabel#managementTitle {
