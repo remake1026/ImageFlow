@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-from PySide6.QtCore import Qt, QPoint, QRect, QSize, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QKeySequence, QPainter, QPen, QPixmap, QIntValidator
+from PySide6.QtCore import Qt, QPoint, QRect, QSize, QTimer, Signal, QItemSelectionModel
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QKeySequence, QShortcut, QPainter, QPen, QPixmap, QIntValidator
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QProgressDialog, QScrollArea,
-    QAbstractScrollArea, QSplitter, QToolButton, QVBoxLayout, QWidget, QSizePolicy,
+    QAbstractScrollArea, QSplitter, QSpinBox, QToolButton, QVBoxLayout, QWidget, QSizePolicy,
     QStyle, QStyleOptionViewItem, QStyledItemDelegate,
 )
 
@@ -145,14 +145,18 @@ class OptionalSequenceControl(QWidget):
 
 
 class TemplateCheckDelegate(QStyledItemDelegate):
-    """尺寸列表：保留深色方框，仅将已选中的对勾绘制为 NuPhy 橙色。"""
+    """尺寸列表：用持续的中性灰高亮标记当前编辑项。"""
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[no-untyped-def]
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         # 每一行实底重绘，滚动时不会把前一帧的半透明阴影带入下一行。
-        background = QColor("#252525") if option.state & QStyle.StateFlag.State_MouseOver else QColor("#1E1E1E")
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        background = QColor("#343434") if selected else QColor("#252525") if hovered else QColor("#1E1E1E")
         painter.fillRect(option.rect, background)
+        if selected:
+            painter.fillRect(QRect(option.rect.left(), option.rect.top(), 3, option.rect.height()), QColor("#8A8A8A"))
         box = QRect(option.rect.left() + 6, option.rect.center().y() - 8, 16, 16)
         painter.setBrush(QColor("#0B0D0F"))
         painter.setPen(QPen(QColor(255, 255, 255, 38), 1))
@@ -162,7 +166,7 @@ class TemplateCheckDelegate(QStyledItemDelegate):
             painter.setPen(QPen(QColor("#F5A623"), 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             painter.drawLine(box.left() + 4, box.center().y(), box.left() + 7, box.bottom() - 4)
             painter.drawLine(box.left() + 7, box.bottom() - 4, box.right() - 3, box.top() + 4)
-        painter.setPen(QColor("#B9B9B9"))
+        painter.setPen(QColor("#F5F5F5") if selected else QColor("#B9B9B9"))
         painter.drawText(option.rect.adjusted(30, 0, -6, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(index.data(Qt.ItemDataRole.DisplayRole) or ""))
         painter.restore()
 
@@ -300,6 +304,94 @@ class SettingsAccordion(QWidget):
         self._headers[index].setToolTip(text)
 
 
+class CustomSizeDialog(QDialog):
+    """在同一个窗口中编辑自定义尺寸的名称、宽度与高度。"""
+
+    def __init__(
+        self,
+        title: str,
+        name: str = "",
+        width: int = 1080,
+        height: int = 1080,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("customSizeDialog")
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setFixedWidth(390)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(10)
+
+        name_label = QLabel("名称")
+        name_label.setObjectName("customSizeFieldLabel")
+        self.name_edit = QLineEdit(name)
+        self.name_edit.setPlaceholderText("例如：电商横图")
+        self.name_edit.setClearButtonEnabled(True)
+        root.addWidget(name_label)
+        root.addWidget(self.name_edit)
+
+        size_label = QLabel("尺寸（像素）")
+        size_label.setObjectName("customSizeFieldLabel")
+        root.addWidget(size_label)
+
+        size_row = QHBoxLayout()
+        size_row.setSpacing(10)
+        width_column = QVBoxLayout()
+        width_column.setSpacing(5)
+        width_column.addWidget(QLabel("宽度"))
+        self.width_spin = QSpinBox()
+        self.width_spin.setObjectName("customSizeSpinBox")
+        self.width_spin.setRange(1, 20000)
+        self.width_spin.setValue(width)
+        width_column.addWidget(self.width_spin)
+
+        multiply = QLabel("×")
+        multiply.setObjectName("customSizeMultiply")
+        multiply.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        height_column = QVBoxLayout()
+        height_column.setSpacing(5)
+        height_column.addWidget(QLabel("高度"))
+        self.height_spin = QSpinBox()
+        self.height_spin.setObjectName("customSizeSpinBox")
+        self.height_spin.setRange(1, 20000)
+        self.height_spin.setValue(height)
+        height_column.addWidget(self.height_spin)
+
+        size_row.addLayout(width_column, 1)
+        size_row.addWidget(multiply)
+        size_row.addLayout(height_column, 1)
+        root.addLayout(size_row)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 8, 0, 0)
+        buttons.setSpacing(10)
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        confirm = QPushButton("确定")
+        confirm.setObjectName("primaryCompactButton")
+        confirm.setDefault(True)
+        confirm.clicked.connect(self._accept_if_valid)
+        buttons.addWidget(cancel, 1)
+        buttons.addWidget(confirm, 1)
+        root.addLayout(buttons)
+
+        self.name_edit.returnPressed.connect(self._accept_if_valid)
+        self.name_edit.setFocus()
+
+    def values(self) -> tuple[str, int, int]:
+        return self.name_edit.text().strip(), self.width_spin.value(), self.height_spin.value()
+
+    def _accept_if_valid(self) -> None:
+        if not self.name_edit.text().strip():
+            self.name_edit.setFocus()
+            return
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     """单窗口桌面应用。业务状态集中于模型，控件只负责读写模型。"""
 
@@ -320,6 +412,7 @@ class MainWindow(QMainWindow):
         self._undo_stack: list[dict[str, object]] = []
         self._restoring_undo = False
         self._syncing = False
+        self._syncing_photo_selection = False
         # 拖动裁剪框时只刷新画布；缩略图条在用户停下后再批量重绘，避免水印
         # 合成抢占主线程造成拖动卡顿。
         self._size_preview_refresh_timer = QTimer(self)
@@ -327,6 +420,7 @@ class MainWindow(QMainWindow):
         self._size_preview_refresh_timer.setInterval(180)
         self._size_preview_refresh_timer.timeout.connect(self._refresh_size_previews)
         self.worker: Optional[ExportWorker] = None
+        self._exporting_photos: list[PhotoItem] = []
         self.import_worker: Optional[ImportWorker] = None
         self.startup_worker: Optional[ImportWorker] = None
         self.presets = load_presets()
@@ -443,6 +537,8 @@ class MainWindow(QMainWindow):
         self.photo_list.setIconSize(QSize(42, 42))
         self.photo_list.setSpacing(4)
         self.photo_list.currentRowChanged.connect(self._on_photo_changed)
+        self.photo_list.itemSelectionChanged.connect(self._on_photo_list_selection_changed)
+        self._add_select_all_shortcut(self.photo_list)
         layout.addWidget(self.photo_list)
         row = QHBoxLayout()
         add = QPushButton("导入")
@@ -523,11 +619,13 @@ class MainWindow(QMainWindow):
         # 紧凑横向缩略图条：展示当前尺寸下所有已导入照片的预览。
         self.size_preview_list = FixedThumbnailList()
         self.size_preview_list.setObjectName("sizePreviewList")
+        self.size_preview_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.size_preview_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.size_preview_list.setFlow(QListWidget.Flow.LeftToRight)
         self.size_preview_list.setWrapping(False)
         self.size_preview_list.setIconSize(QSize(66, 50))
-        self.size_preview_list.setGridSize(QSize(84, 70))
+        # 卡片宽约 56px；网格宽 70px 留出约一半的原有横向间距。
+        self.size_preview_list.setGridSize(QSize(70, 70))
         # 为项目高度、内边距和横向滚动条分别预留空间，避免滚动条压住照片
         # 下缘或选中框；宽度仍跟随中间工作区，而不是缩略图数量。
         self.size_preview_list.setFixedHeight(108)
@@ -535,8 +633,10 @@ class MainWindow(QMainWindow):
         self.size_preview_list.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self.size_preview_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.size_preview_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.size_preview_list.setToolTip("当前尺寸下的全部照片预览；点击即可切换画布照片")
+        self.size_preview_list.setToolTip("当前尺寸下的全部照片预览；支持 Ctrl / Shift 多选，并与左侧照片列表同步")
+        self.size_preview_list.itemSelectionChanged.connect(self._on_size_preview_selection_changed)
         self.size_preview_list.itemClicked.connect(self._on_size_preview_photo_clicked)
+        self._add_select_all_shortcut(self.size_preview_list)
         layout.addWidget(self.size_preview_list)
         return panel
 
@@ -581,16 +681,22 @@ class MainWindow(QMainWindow):
 
         export_footer = QWidget()
         export_footer.setObjectName("exportFooter")
-        export_footer_layout = QHBoxLayout(export_footer)
+        export_footer_layout = QVBoxLayout(export_footer)
         # 与滚动设置区内容使用相同的水平内边距，使底部导出按钮与折叠标题对齐。
         export_footer_layout.setContentsMargins(16, 0, 16, 0)
-        export_footer_layout.setSpacing(0)
+        export_footer_layout.setSpacing(8)
 
         self.export_all_button = QPushButton("一键导出全部")
         self.export_all_button.setObjectName("primaryButton")
         self.export_all_button.setProperty("footerButton", True)
         self.export_all_button.clicked.connect(self.start_export)
         export_footer_layout.addWidget(self.export_all_button)
+        self.export_selected_button = QPushButton("导出选中照片")
+        self.export_selected_button.setObjectName("secondaryExportButton")
+        self.export_selected_button.setToolTip("导出左侧列表当前选中的一张或多张照片（支持 Ctrl / Shift 多选）")
+        self.export_selected_button.clicked.connect(self.start_export_selected)
+        export_footer_layout.addWidget(self.export_selected_button)
+        self._update_export_selected_button()
         panel_layout.addWidget(export_footer)
         return panel
 
@@ -608,9 +714,10 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
         self.template_list = QListWidget()
         self.template_list.setObjectName("templateList")
-        self.template_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.template_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.template_list.setItemDelegate(TemplateCheckDelegate(self.template_list))
         self.template_list.itemChanged.connect(self._on_template_checked)
+        self.template_list.currentItemChanged.connect(self._on_template_selected)
         layout.addWidget(self.template_list)
         buttons = QHBoxLayout()
         add = QPushButton("新增自定义")
@@ -932,20 +1039,32 @@ class MainWindow(QMainWindow):
     def _refresh_template_list(self) -> None:
         self._syncing = True
         self.template_list.clear()
+        current_item: Optional[QListWidgetItem] = None
         for template in self.templates:
             item = QListWidgetItem(template.display_name)
             item.setData(Qt.ItemDataRole.UserRole, template.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if template.selected else Qt.CheckState.Unchecked)
             self.template_list.addItem(item)
+            if template.id == self.current_template_id:
+                current_item = item
+        if current_item:
+            self.template_list.setCurrentItem(current_item)
         self._syncing = False
 
     def _refresh_photo_list(self, cached_only: bool = False) -> None:
+        selected_photo_ids = {
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self.photo_list.selectedItems()
+            if isinstance(item.data(Qt.ItemDataRole.UserRole), str)
+        }
+        self._syncing_photo_selection = True
         self.photo_list.blockSignals(True)
         self.photo_list.clear()
         for photo in self.photos:
             state, state_key = self._photo_state(photo)
             item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, photo.id)
             item.setSizeHint(QSize(0, 64))
             try:
                 # 左侧图标只能缩放副本，不能破坏中央大预览使用的缓存。
@@ -981,12 +1100,19 @@ class MainWindow(QMainWindow):
             content_layout.addWidget(thumbnail)
             content_layout.addLayout(text_column, 1)
             self.photo_list.setItemWidget(item, content)
-        self.photo_list.blockSignals(False)
         if self.photos:
             self.current_photo_index = min(max(0, self.current_photo_index), len(self.photos) - 1)
-            self.photo_list.setCurrentRow(self.current_photo_index)
+            for row, photo in enumerate(self.photos):
+                self.photo_list.item(row).setSelected(photo.id in selected_photo_ids)
+            if not self.photo_list.selectedItems():
+                self.photo_list.item(self.current_photo_index).setSelected(True)
+            current_index = self.photo_list.model().index(self.current_photo_index, 0)
+            self.photo_list.selectionModel().setCurrentIndex(current_index, QItemSelectionModel.SelectionFlag.NoUpdate)
         else:
             self.current_photo_index = -1
+        self.photo_list.blockSignals(False)
+        self._syncing_photo_selection = False
+        self._on_photo_list_selection_changed()
 
     @staticmethod
     def _photo_state(photo: PhotoItem) -> tuple[str, str]:
@@ -1041,8 +1167,13 @@ class MainWindow(QMainWindow):
             self._size_preview_refresh_timer.stop()
         scroll_value = self.size_preview_list.horizontalScrollBar().value()
         self._refresh_size_preview_selector()
+        selected_rows = {item.row() for item in self.photo_list.selectedIndexes()}
+        self._syncing_photo_selection = True
+        self.size_preview_list.blockSignals(True)
         self.size_preview_list.clear()
         if not self.photos:
+            self.size_preview_list.blockSignals(False)
+            self._syncing_photo_selection = False
             return
         try:
             template = self.current_template()
@@ -1067,11 +1198,18 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, index)
                 item.setToolTip(photo.filename)
                 self.size_preview_list.addItem(item)
-                if index == self.current_photo_index:
+                if index in selected_rows:
                     item.setSelected(True)
         except Exception:
             self.size_preview_list.clear()
+            self.size_preview_list.blockSignals(False)
+            self._syncing_photo_selection = False
             return
+        if 0 <= self.current_photo_index < self.size_preview_list.count():
+            current_index = self.size_preview_list.model().index(self.current_photo_index, 0)
+            self.size_preview_list.selectionModel().setCurrentIndex(current_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+        self.size_preview_list.blockSignals(False)
+        self._syncing_photo_selection = False
         # clear()/重建列表会将滚动条复位；等待 Qt 更新范围后恢复用户原位置。
         QTimer.singleShot(0, lambda value=scroll_value: self._restore_size_preview_scroll(value))
 
@@ -1109,6 +1247,11 @@ class MainWindow(QMainWindow):
         if template_id not in [item.id for item in self.templates]:
             return
         self.current_template_id = template_id
+        for row in range(self.template_list.count()):
+            item = self.template_list.item(row)
+            if item.data(Qt.ItemDataRole.UserRole) == template_id:
+                self.template_list.setCurrentItem(item)
+                break
         self._refresh_all()
 
     def _on_size_preview_selected(self, index: int) -> None:
@@ -1118,11 +1261,72 @@ class MainWindow(QMainWindow):
         if template_id:
             self.set_current_template(template_id)
 
+    @staticmethod
+    def _add_select_all_shortcut(list_widget: QListWidget) -> None:
+        """仅在对应列表拥有焦点时响应 Ctrl+A，避免影响其他输入控件。"""
+        shortcut = QShortcut(QKeySequence.StandardKey.SelectAll, list_widget)
+        shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(list_widget.selectAll)
+
+    @staticmethod
+    def _set_list_selection(list_widget: QListWidget, selected_rows: set[int]) -> None:
+        for row in range(list_widget.count()):
+            list_widget.item(row).setSelected(row in selected_rows)
+
+    def _on_photo_list_selection_changed(self) -> None:
+        """左侧列表是选中状态的权威来源，并同步给底部缩略图。"""
+        self._update_export_selected_button()
+        if self._syncing_photo_selection:
+            return
+        selected_rows = {item.row() for item in self.photo_list.selectedIndexes()}
+        self._syncing_photo_selection = True
+        self.size_preview_list.blockSignals(True)
+        self._set_list_selection(self.size_preview_list, selected_rows)
+        current_row = self.photo_list.currentRow()
+        if 0 <= current_row < self.size_preview_list.count():
+            current_index = self.size_preview_list.model().index(current_row, 0)
+            self.size_preview_list.selectionModel().setCurrentIndex(current_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+        self.size_preview_list.blockSignals(False)
+        self._syncing_photo_selection = False
+
+    def _on_size_preview_selection_changed(self) -> None:
+        """底部缩略图的 Ctrl / Shift 多选同步到左侧与选中导出。"""
+        if self._syncing_photo_selection:
+            return
+        selected_rows = {item.row() for item in self.size_preview_list.selectedIndexes()}
+        self._syncing_photo_selection = True
+        self.photo_list.blockSignals(True)
+        self._set_list_selection(self.photo_list, selected_rows)
+        current_row = self.size_preview_list.currentRow()
+        if 0 <= current_row < self.photo_list.count():
+            current_index = self.photo_list.model().index(current_row, 0)
+            self.photo_list.selectionModel().setCurrentIndex(current_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+        self.photo_list.blockSignals(False)
+        self._syncing_photo_selection = False
+        self._update_export_selected_button()
+
     def _on_size_preview_photo_clicked(self, item: QListWidgetItem) -> None:
-        """点击底部任意照片预览，同步切换左侧列表和黑色画布。"""
+        """点击底部任意照片预览时保持多选，仅切换当前编辑照片。"""
         index = item.data(Qt.ItemDataRole.UserRole)
         if isinstance(index, int) and 0 <= index < len(self.photos):
-            self.photo_list.setCurrentRow(index)
+            self._syncing_photo_selection = True
+            current_index = self.photo_list.model().index(index, 0)
+            self.photo_list.selectionModel().setCurrentIndex(current_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            self._syncing_photo_selection = False
+            self._on_photo_changed(index)
+
+    def _on_template_selected(
+        self,
+        current: Optional[QListWidgetItem],
+        _previous: Optional[QListWidgetItem],
+    ) -> None:
+        """切换尺寸列表行时持续标记当前编辑的尺寸。"""
+        if self._syncing or not current:
+            return
+        template_id = current.data(Qt.ItemDataRole.UserRole)
+        if isinstance(template_id, str) and template_id != self.current_template_id:
+            self.current_template_id = template_id
+            self._refresh_all()
 
     def _on_template_checked(self, item: QListWidgetItem) -> None:
         if self._syncing:
@@ -1132,7 +1336,8 @@ class MainWindow(QMainWindow):
         template.selected = item.checkState() == Qt.CheckState.Checked
         # 原图比例始终可预览；取消当前尺寸后，立即回到固定可用的原图比例。
         if not template.selected and template.id == self.current_template_id and template.id != "original":
-            self.current_template_id = "original"
+            self.set_current_template("original")
+            return
         self._refresh_all()
 
     # ---------- 撤销与拖放 ----------
@@ -1395,13 +1600,11 @@ class MainWindow(QMainWindow):
             self.photo_list.setCurrentRow((self.current_photo_index + 1) % len(self.photos))
 
     def add_custom_template(self) -> None:
-        name, ok = QInputDialog.getText(self, "新增自定义尺寸", "名称（例如：电商横图）")
-        if not ok or not name.strip(): return
-        width, ok = QInputDialog.getInt(self, "新增自定义尺寸", "宽度（像素）", 1080, 1, 20000)
-        if not ok: return
-        height, ok = QInputDialog.getInt(self, "新增自定义尺寸", "高度（像素）", 1080, 1, 20000)
-        if not ok: return
-        template = SizeTemplate(f"custom_{len(self.templates)}_{width}x{height}", f"{name.strip()}（{width}×{height}）", width, height, True, False)
+        dialog = CustomSizeDialog("新增自定义尺寸", parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, width, height = dialog.values()
+        template = SizeTemplate(f"custom_{len(self.templates)}_{width}x{height}", f"{name}（{width}×{height}）", width, height, True, False)
         self._push_undo_state()
         self.templates.append(template); self.current_template_id = template.id; self._refresh_template_list(); self._refresh_all()
 
@@ -1413,17 +1616,14 @@ class MainWindow(QMainWindow):
     def edit_custom_template(self) -> None:
         template = self._selected_template_for_edit()
         if not template: return
-        if template.builtin:
-            self._info("内置模板不可修改", "请新增一个自定义尺寸模板后再编辑。")
+        base_name = template.name.split("（")[0]
+        dialog = CustomSizeDialog("修改尺寸", base_name, template.width, template.height, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        width, ok = QInputDialog.getInt(self, "修改自定义尺寸", "宽度（像素）", template.width, 1, 20000)
-        if not ok: return
-        height, ok = QInputDialog.getInt(self, "修改自定义尺寸", "高度（像素）", template.height, 1, 20000)
-        if ok:
-            self._push_undo_state()
-            base_name = template.name.split("（")[0]
-            template.width, template.height, template.name = width, height, f"{base_name}（{width}×{height}）"
-            self._refresh_template_list(); self._refresh_all()
+        name, width, height = dialog.values()
+        self._push_undo_state()
+        template.width, template.height, template.name = width, height, f"{name}（{width}×{height}）"
+        self._refresh_template_list(); self._refresh_all()
 
     def delete_custom_template(self) -> None:
         template = self._selected_template_for_edit()
@@ -1764,8 +1964,28 @@ class MainWindow(QMainWindow):
         self.replace_original_name_check.setChecked(s.replace_original_name)
         self._update_naming_rule_preview()
 
-    def start_export(self) -> None:
-        if not self.photos:
+    def _selected_photos_for_export(self) -> list[PhotoItem]:
+        """按列表顺序返回当前多选照片，保证序号与导出顺序稳定。"""
+        rows = sorted({item.row() for item in self.photo_list.selectedIndexes()})
+        return [self.photos[row] for row in rows if 0 <= row < len(self.photos)]
+
+    def _update_export_selected_button(self) -> None:
+        if not hasattr(self, "export_selected_button"):
+            return
+        count = len(self._selected_photos_for_export()) if hasattr(self, "photo_list") else 0
+        self.export_selected_button.setEnabled(count > 0)
+        self.export_selected_button.setText("导出选中照片" if count == 0 else f"导出选中照片（{count}）")
+
+    def start_export_selected(self) -> None:
+        selected_photos = self._selected_photos_for_export()
+        if not selected_photos:
+            self._info("未选择照片", "请在左侧列表选择一张或多张照片后再导出。")
+            return
+        self.start_export(selected_photos)
+
+    def start_export(self, photos_to_export: Optional[list[PhotoItem]] = None) -> None:
+        photos = self.photos if photos_to_export is None else photos_to_export
+        if not photos:
             return self._info("没有可导出的照片", "请先导入一张或多张修图成片。")
         selected = [template for template in self.templates if template.selected]
         if not selected:
@@ -1781,16 +2001,17 @@ class MainWindow(QMainWindow):
             jobs = [
                 ExportJob(photo, template, sequence_start + index)
                 for index, (photo, template) in enumerate(
-                    (photo, template) for photo in self.photos for template in selected
+                    (photo, template) for photo in photos for template in selected
                 )
             ]
         else:
-            jobs = [ExportJob(photo, template, sequence_start + photo_index) for photo_index, photo in enumerate(self.photos) for template in selected]
+            jobs = [ExportJob(photo, template, sequence_start + photo_index) for photo_index, photo in enumerate(photos) for template in selected]
         preview = "\n".join(build_filename(self.export_settings, job.template, job.sequence, job.photo.filename) + "." + self.export_settings.image_format.lower() for job in jobs[:6])
         if len(jobs) > 6: preview += "\n……"
-        answer = QMessageBox.question(self, "确认导出", f"将导出 {len(jobs)} 个文件。\n\n文件名预览：\n{preview}\n\n是否开始？")
+        answer = QMessageBox.question(self, "确认导出", f"将导出 {len(jobs)} 个文件（共 {len(photos)} 张照片）。\n\n文件名预览：\n{preview}\n\n是否开始？")
         if answer != QMessageBox.StandardButton.Yes: return
         self.presets["last_output"] = self.export_settings.output_folder; save_presets(self.presets)
+        self._exporting_photos = list(photos)
         self.worker = ExportWorker(jobs, self.watermark_path, copy.deepcopy(self.export_settings))
         self.progress = QProgressDialog("正在准备导出……", "取消导出", 0, len(jobs), self)
         self.progress.setWindowTitle("批量导出")
@@ -1803,14 +2024,16 @@ class MainWindow(QMainWindow):
         self.progress.setMaximum(total); self.progress.setValue(current); self.progress.setLabelText(f"正在导出 {current}/{total}：{filename}")
 
     def _on_export_failed(self, error: str) -> None:
-        self.progress.close(); self._error("导出失败", error)
+        self.progress.close(); self._exporting_photos = []; self._error("导出失败", error)
 
     def _on_export_cancelled(self) -> None:
-        self.progress.close(); self._info("已取消导出", "已完成的文件会保留，未开始的文件不会导出。")
+        self.progress.close(); self._exporting_photos = []; self._info("已取消导出", "已完成的文件会保留，未开始的文件不会导出。")
 
     def _on_export_completed(self, folder: str) -> None:
         self.progress.close()
-        for photo in self.photos: setattr(photo, "exported", True)
+        for photo in self._exporting_photos:
+            setattr(photo, "exported", True)
+        self._exporting_photos = []
         self._refresh_photo_list()
         result = QMessageBox.question(self, "导出完成", f"全部文件已导出至：\n{folder}\n\n是否打开输出文件夹？")
         if result == QMessageBox.StandardButton.Yes: os.startfile(folder)
