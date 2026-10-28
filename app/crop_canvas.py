@@ -4,11 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QLineF, QPoint, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEvent, QLineF, QPoint, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
+from PySide6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit, QTextEdit, QPlainTextEdit, QWidget
 
+from .detail_preview import DetailPreviewLoader
 from .image_processor import pil_to_pixmap, watermark_rect
+from .theme import ACCENT
 from .models import CropSettings, SizeTemplate, WatermarkSettings
 
 
@@ -36,6 +38,18 @@ class CropCanvas(QWidget):
         self._watermark_rect = QRectF()
         self._resize_corner = ""
         self._result_preview = False
+        self._preview_zoom = 1.0
+        self._preview_offset = QPointF()
+        self._preview_identity = None
+        self._space_pressed = False
+        self._detail_loader = DetailPreviewLoader(self)
+        self._detail_loader.ready.connect(self.update)
+        self._detail_interacting = False
+        self._detail_timer = QTimer(self)
+        self._detail_timer.setSingleShot(True)
+        self._detail_timer.setInterval(180)
+        self._detail_timer.timeout.connect(self._settle_detail_preview)
+        QApplication.instance().installEventFilter(self)
 
     def set_content(
         self,
@@ -44,7 +58,13 @@ class CropCanvas(QWidget):
         crop: CropSettings,
         watermark_path: str,
         watermark: WatermarkSettings,
+        preview_identity=None,
+        source_path: str = "",
     ) -> None:
+        if preview_identity != self._preview_identity:
+            self._preview_identity = preview_identity
+            self.reset_preview_view()
+        self._detail_loader.set_source(source_path)
         self._pixmap = pil_to_pixmap(image)
         self._template, self._crop, self._watermark = template, crop, watermark
         # 拖动裁剪框时会频繁刷新画布。水印文件未变时复用已经解码的 QPixmap，
@@ -52,15 +72,85 @@ class CropCanvas(QWidget):
         if watermark_path != self._watermark_path:
             self._watermark_path = watermark_path
             self._watermark_pixmap = QPixmap(watermark_path) if watermark_path and Path(watermark_path).is_file() else QPixmap()
-        self.update()
+        self._schedule_detail_refresh()
 
     def set_result_preview(self, enabled: bool) -> None:
         """切换裁剪结果的纯显示模式，不改动任何裁剪参数。"""
         self._result_preview = enabled
+        self.reset_preview_view()
+        self._space_pressed = False
         self._drag_mode = ""
         self._resize_corner = ""
         self.setCursor(Qt.CursorShape.ArrowCursor if enabled else Qt.CursorShape.OpenHandCursor)
+        self._schedule_detail_refresh()
+
+    def reset_preview_view(self) -> None:
+        """仅重置查看比例和位置，不改变裁剪参数。"""
+        self._preview_zoom = 1.0
+        self._preview_offset = QPointF()
+        self._schedule_detail_refresh()
+
+    def _schedule_detail_refresh(self) -> None:
+        self._detail_interacting = True
+        self._detail_timer.start()
         self.update()
+
+    def _settle_detail_preview(self) -> None:
+        if self._drag_mode:
+            self._detail_timer.start()
+            return
+        self._detail_interacting = False
+        self._layout()
+        if not self._pixmap.isNull() and not self._frame.isEmpty():
+            scale = self._image_rect.width() / self._pixmap.width()
+            if self._result_preview:
+                scale *= min(self.width() / self._frame.width(), self.height() / self._frame.height())
+            # 乘上设备像素比，高 DPI 屏幕同样按实际显示像素请求清晰预览。
+            if scale * self._preview_zoom * self.devicePixelRatioF() > 1.0:
+                self._detail_loader.request()
+        self.update()
+
+    def _draw_photo(self, painter: QPainter, target: QRectF, source: QRectF) -> None:
+        detail = self._detail_loader.image
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, not self._detail_interacting)
+        if self._detail_interacting or detail.isNull():
+            painter.drawPixmap(target, self._pixmap, source)
+            return
+        # 几何仍以原有预览坐标计算；只替换采样图像，构图不会跳动。
+        sx, sy = detail.width() / self._pixmap.width(), detail.height() / self._pixmap.height()
+        painter.drawImage(target, detail, QRectF(source.x() * sx, source.y() * sy, source.width() * sx, source.height() * sy))
+
+    def shutdown(self) -> None:
+        self._detail_timer.stop()
+        self._detail_loader.shutdown()
+
+    def has_view_transform(self) -> bool:
+        return self._preview_zoom != 1.0 or not self._preview_offset.isNull()
+
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
+        # 空格可以先于鼠标按下；仅在鼠标位于画布或画布拥有焦点时接管，
+        # 文本输入控件保持正常输入行为。
+        if event.type() == QEvent.Type.WindowDeactivate and watched is self.window():
+            self._space_pressed = False
+            if self._drag_mode == "preview_pan":
+                self._drag_mode = ""
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Space:
+            if event.isAutoRepeat():
+                return self._space_pressed
+            if event.type() == QEvent.Type.KeyRelease and self._space_pressed:
+                self._space_pressed = False
+                if self._drag_mode == "preview_pan":
+                    self._drag_mode = ""
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                return True
+            focus = QApplication.focusWidget()
+            editing_text = isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)) or (isinstance(focus, QComboBox) and focus.isEditable())
+            if event.type() == QEvent.Type.KeyPress and self.window().isActiveWindow() and (self.underMouse() or self.hasFocus()) and not editing_text:
+                self._space_pressed = True
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                return True
+        return super().eventFilter(watched, event)
 
     def is_result_preview(self) -> bool:
         return self._result_preview
@@ -146,7 +236,7 @@ class CropCanvas(QWidget):
             source_rect.width() * preview_scale,
             source_rect.height() * preview_scale,
         )
-        painter.drawPixmap(target_rect, self._pixmap, source_rect)
+        self._draw_photo(painter, target_rect, source_rect)
         if not self._watermark_rect.isNull():
             watermark_rect = QRectF(
                 target_rect.left() + (self._watermark_rect.left() - self._frame.left()) * target_rect.width() / self._frame.width(),
@@ -159,7 +249,7 @@ class CropCanvas(QWidget):
     def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         """窗口变化时重算 contain 比例，但不修改已保存的构图参数。"""
         super().resizeEvent(event)
-        self.update()
+        self._schedule_detail_refresh()
 
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         painter = QPainter(self)
@@ -169,12 +259,17 @@ class CropCanvas(QWidget):
             painter.setPen(QColor("#c6cbd4"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "导入照片后在此调整裁剪构图")
             return
+        # 查看变换同时作用于编辑画布和成图预览，不改变裁剪数据。
+        center = QRectF(self.rect()).center()
+        painter.translate(center + self._preview_offset)
+        painter.scale(self._preview_zoom, self._preview_zoom)
+        painter.translate(-center)
         if self._result_preview:
             self._paint_result_preview(painter)
             return
         # 先完整显示图片；裁剪框之外会在下方叠加半透明遮罩。
         # 这样既能明确看到最终交付范围，也能看到被裁掉的画面。
-        painter.drawPixmap(self._image_rect, self._pixmap, QRectF(self._pixmap.rect()))
+        self._draw_photo(painter, self._image_rect, QRectF(self._pixmap.rect()))
         if not self._watermark_rect.isNull():
             self._draw_watermark(painter, self._watermark_rect, self._frame)
         if self._crop and self._crop.guide_enabled:
@@ -184,14 +279,17 @@ class CropCanvas(QWidget):
                 painter.drawLine(QLineF(self._frame.left(), self._frame.top() + self._frame.height() * ratio, self._frame.right(), self._frame.top() + self._frame.height() * ratio))
         if self._watermark and self._watermark.safe_area:
             margin = self._frame.width() * self._watermark.margin_percent / 100
-            painter.setPen(QPen(QColor("#F59A23"), 1, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
             painter.drawRect(self._frame.adjusted(margin, margin, -margin, -margin))
         # 裁剪外遮罩
         shade = QColor(0, 0, 0, 128)
-        painter.fillRect(QRectF(0, 0, self.width(), self._frame.top()), shade)
-        painter.fillRect(QRectF(0, self._frame.bottom(), self.width(), self.height() - self._frame.bottom()), shade)
-        painter.fillRect(QRectF(0, self._frame.top(), self._frame.left(), self._frame.height()), shade)
-        painter.fillRect(QRectF(self._frame.right(), self._frame.top(), self.width() - self._frame.right(), self._frame.height()), shade)
+        painter.save()
+        outside = QPainterPath()
+        visible = painter.transform().inverted()[0].mapRect(QRectF(self.rect()))
+        outside.addRect(visible)
+        outside.addRect(self._frame)
+        painter.fillPath(outside, shade)
+        painter.restore()
         painter.setPen(QPen(QColor(235, 235, 235, 220), 1))
         painter.drawRect(self._frame)
         # 四角的小延长线让裁剪边界更接近专业修图软件的视觉表现。
@@ -206,56 +304,83 @@ class CropCanvas(QWidget):
             painter.drawLine(QLineF(x, y, x + sx * handle, y))
             painter.drawLine(QLineF(x, y, x, y + sy * handle))
 
+    def _view_to_canvas(self, position: QPointF) -> QPointF:
+        center = QRectF(self.rect()).center()
+        return center + (position - center - self._preview_offset) / self._preview_zoom
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if self._result_preview or event.button() != Qt.MouseButton.LeftButton or not self._crop:
+        if event.button() == Qt.MouseButton.LeftButton and self._space_pressed:
+            self.setFocus()
+            self._drag_mode = "preview_pan"
+            self._last_pos = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        if self._result_preview:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.setFocus()
+            return
+        if event.button() != Qt.MouseButton.LeftButton or not self._crop:
             return
         self.setFocus()
         self._layout()
         self._last_pos = event.position().toPoint()
-        corner = self._corner_at(event.position())
+        position = self._view_to_canvas(event.position())
+        corner = self._corner_at(position)
         if corner:
             self.edit_started.emit()
             self._drag_mode = "resize"
             self._resize_corner = corner
             self.setCursor(self._cursor_for_corner(corner))
         # 主预览中的水印只用于显示最终效果；水印位置只能在编辑器中调整。
-        elif self._frame.contains(event.position()):
+        elif self._frame.contains(position):
             self.edit_started.emit()
             self._drag_mode = "crop"
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._result_preview or not self._crop:
+        if self._drag_mode == "preview_pan":
+            delta = event.position().toPoint() - self._last_pos
+            self._last_pos = event.position().toPoint()
+            self._preview_offset += QPointF(delta)
+            self._schedule_detail_refresh()
+            event.accept()
+            return
+        if self._result_preview:
+            return
+        if not self._crop:
             return
         if not self._drag_mode:
             self._layout()
-            corner = self._corner_at(event.position())
+            position = self._view_to_canvas(event.position())
+            corner = self._corner_at(position)
             if corner:
                 self.setCursor(self._cursor_for_corner(corner))
             else:
-                self.setCursor(Qt.CursorShape.OpenHandCursor if self._frame.contains(event.position()) else Qt.CursorShape.ArrowCursor)
+                self.setCursor(Qt.CursorShape.OpenHandCursor if self._frame.contains(position) else Qt.CursorShape.ArrowCursor)
             return
         delta = event.position().toPoint() - self._last_pos
         self._last_pos = event.position().toPoint()
         if self._drag_mode == "resize":
             from_center = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-            self._resize_frame_from_corner(event.position(), from_center)
+            self._resize_frame_from_corner(self._view_to_canvas(event.position()), from_center)
             self.crop_changed.emit()
         else:
-            self._move_frame_by_screen_pixels(delta.x(), delta.y())
+            self._move_frame_by_screen_pixels(delta.x() / self._preview_zoom, delta.y() / self._preview_zoom)
             self.crop_changed.emit()
-        self.update()
+        self._schedule_detail_refresh()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if self._result_preview:
+        self._schedule_detail_refresh()
+        if self._result_preview or self._drag_mode == "preview_pan":
             self._drag_mode = ""
             self._resize_corner = ""
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._space_pressed else Qt.CursorShape.ArrowCursor)
             return
         self._drag_mode = ""
         self._resize_corner = ""
         self._layout()
-        self.setCursor(Qt.CursorShape.OpenHandCursor if self._frame.contains(event.position()) else Qt.CursorShape.ArrowCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor if self._frame.contains(self._view_to_canvas(event.position())) else Qt.CursorShape.ArrowCursor)
 
     def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if not self._drag_mode:
@@ -265,8 +390,8 @@ class CropCanvas(QWidget):
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         # 编辑状态下需在裁剪框内双击进入成图预览；成图预览状态下再次
         # 双击画布即可返回编辑状态，形成可反复切换的预览循环。
-        if event.button() == Qt.MouseButton.LeftButton and (
-            self._result_preview or self._frame.contains(event.position())
+        if not self._space_pressed and event.button() == Qt.MouseButton.LeftButton and (
+            self._result_preview or self._frame.contains(self._view_to_canvas(event.position()))
         ):
             self.result_preview_requested.emit()
             event.accept()
@@ -274,7 +399,28 @@ class CropCanvas(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if self._result_preview or not self._crop or not self._frame.contains(event.position()):
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier and not self._pixmap.isNull():
+            # Windows 上 Alt+滚轮可能被转换为横向滚轮（x 非零、y 为零）。
+            # 两个方向均用于查看缩放；触控板仅有像素增量时也应响应。
+            angle = event.angleDelta()
+            steps = (angle.y() or angle.x()) / 120
+            if not steps:
+                pixels = event.pixelDelta()
+                steps = (pixels.y() or pixels.x()) / 40
+            if not steps:
+                event.ignore()
+                return
+            old_zoom = self._preview_zoom
+            self._preview_zoom = max(0.1, min(16.0, old_zoom * (1.12 ** steps)))
+            center = QRectF(self.rect()).center()
+            anchor = event.position() - center
+            self._preview_offset = anchor - (anchor - self._preview_offset) * (self._preview_zoom / old_zoom)
+            self.setFocus()
+            self._schedule_detail_refresh()
+            event.accept()
+            return
+        if self._result_preview or not self._crop or not self._frame.contains(self._view_to_canvas(event.position())):
+            event.ignore()
             return
         # 鼠标所在位置是缩放锚点：缩放的是裁剪框，原图不移动。
         self._layout()
@@ -291,8 +437,9 @@ class CropCanvas(QWidget):
         old_crop_w, old_crop_h = base_w / old_zoom, base_h / old_zoom
         new_crop_w, new_crop_h = base_w / new_zoom, base_h / new_zoom
         scale = self._image_rect.width() / iw
-        mouse_x = (event.position().x() - self._image_rect.left()) / scale
-        mouse_y = (event.position().y() - self._image_rect.top()) / scale
+        position = self._view_to_canvas(event.position())
+        mouse_x = (position.x() - self._image_rect.left()) / scale
+        mouse_y = (position.y() - self._image_rect.top()) / scale
         old_center_x = iw / 2 + self._crop.offset_x * (iw - old_crop_w) / 2
         old_center_y = ih / 2 + self._crop.offset_y * (ih - old_crop_h) / 2
         relative_x = (mouse_x - old_center_x) / old_crop_w
@@ -300,7 +447,7 @@ class CropCanvas(QWidget):
         self._crop.zoom = new_zoom
         self._set_frame_center(mouse_x - relative_x * new_crop_w, mouse_y - relative_y * new_crop_h, new_crop_w, new_crop_h)
         self.crop_changed.emit()
-        self.update()
+        self._schedule_detail_refresh()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if self._result_preview or not self._crop:
@@ -356,7 +503,7 @@ class CropCanvas(QWidget):
         self._crop.zoom = new_zoom
         self._set_frame_center(center_x, center_y, new_crop_w, new_crop_h)
         self.crop_changed.emit()
-        self.update()
+        self._schedule_detail_refresh()
 
     def nudge_frame(self, dx: int, dy: int) -> None:
         """提供给方向键和界面按钮的裁剪框像素级微调。"""
@@ -365,7 +512,7 @@ class CropCanvas(QWidget):
         self._layout()
         self._move_frame_by_screen_pixels(dx, dy)
         self.crop_changed.emit()
-        self.update()
+        self._schedule_detail_refresh()
 
     def _corner_at(self, position) -> str:  # type: ignore[no-untyped-def]
         """返回鼠标命中的裁剪框角点；角点用于等比例缩放。"""

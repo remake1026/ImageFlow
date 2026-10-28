@@ -2,7 +2,7 @@
    ImageFlow 右侧设置栏 · 微玻璃层级覆盖
    使用半透明层、细高光边、低对比渐变和 QGraphicsDropShadowEffect 模拟玻璃质感。
    不包含真正的 backdrop-filter、Windows Acrylic 或 Mica。
-   Tokens: background #101112 | sidebar #141516 | accent #F5A623 | accent hover #FFB238
+   Tokens: background #101112 | sidebar #141516 | accent @accent@ | accent hover @accent_hover@
 */
 
 QMainWindow { background: #101112; }
@@ -24,10 +24,10 @@ QToolBar#mainToolbar QCheckBox#cropResultPreviewCheck::indicator {
     border: 1px solid rgba(255,255,255,0.22);
     border-radius: 6px;
 }
-QToolBar#mainToolbar QCheckBox#cropResultPreviewCheck::indicator:hover { border-color: rgba(245,166,35,0.60); }
+QToolBar#mainToolbar QCheckBox#cropResultPreviewCheck::indicator:hover { border-color: @accent_hover@; }
 QToolBar#mainToolbar QCheckBox#cropResultPreviewCheck::indicator:checked {
-    background: #F5A623;
-    border-color: #F5A623;
+    background: @accent@;
+    border-color: @accent@;
 }
 
 QWidget#rightPanel,
@@ -56,47 +56,49 @@ QToolBox#settingsToolbox::tab {
 }
 QToolBox#settingsToolbox::tab:hover {
     color: #F2F2F2;
-    background: rgba(255,255,255,0.075);
-    border-color: rgba(245,166,35,0.28);
+    background: @hover_background@;
+    border-color: @accent_hover@;
 }
 QToolBox#settingsToolbox::tab:selected {
     color: #FFFFFF;
-    background: qradialgradient(cx:0.03, cy:0.5, radius:0.72, fx:0.03, fy:0.5,
-        stop:0 rgba(245,166,35,0.20),
-        stop:0.16 rgba(245,166,35,0.08),
-        stop:0.44 rgba(255,255,255,0.09),
-        stop:1 rgba(255,255,255,0.062));
-    border: 1px solid rgba(245,166,35,0.18);
-    border-left: 5px solid #F5A623;
+    background: @selection@;
+    border: 1px solid rgba(@accent_rgb@,0.18);
+    border-left: 5px solid @accent@;
     border-radius: 14px;
 }
 
-QWidget#settingsAccordion { background: transparent; }
-QToolButton#settingsAccordionHeader {
-    min-height: 46px;
-    padding: 0 42px 0 28px;
-    color: #C7C8CB;
-    font-size: 16px;
-    font-weight: 600;
-    text-align: left;
-    background: rgba(255,255,255,0.042);
-    border: 1px solid rgba(255,255,255,0.055);
-    border-radius: 14px;
+QTabWidget#settingsTabs, QWidget#settingsTabContent {
+    background: #141516;
+    border: none;
 }
-QToolButton#settingsAccordionHeader:hover {
+QTabWidget#settingsTabs::pane {
+    border: none;
+    background: #141516;
+}
+QTabBar#settingsTabBar {
+    background: #1C1D1F;
+}
+QTabBar#settingsTabBar::tab {
+    color: #AEB0B4;
+    background: #1C1D1F;
+    border: none;
+    border-bottom: 2px solid #303134;
+    padding: 10px 8px;
+    font-size: 13px;
+    font-weight: 500;
+}
+QTabBar#settingsTabBar::tab:hover {
     color: #F2F2F2;
-    background: rgba(255,255,255,0.075);
-    border-color: rgba(245,166,35,0.28);
+    background: @hover_background@;
 }
-QToolButton#settingsAccordionHeader:checked {
-    color: #FFFFFF;
-    background: qradialgradient(cx:0.03, cy:0.5, radius:0.72, fx:0.03, fy:0.5,
-        stop:0 rgba(245,166,35,0.20),
-        stop:0.16 rgba(245,166,35,0.08),
-        stop:0.44 rgba(255,255,255,0.09),
-        stop:1 rgba(255,255,255,0.062));
-    border: 1px solid rgba(245,166,35,0.18);
-    border-radius: 14px;
+QTabBar#settingsTabBar::tab:selected {
+    color: @accent@;
+    background: @selection@;
+    border-bottom: 2px solid @accent@;
+    font-weight: 600;
+}
+QTabBar#settingsTabBar::tab:focus {
+    border-bottom: 2px solid @accent_hover@;
 }
 
 QWidget#settingsPage[glassCard="true"] {
@@ -146,10 +148,10 @@ QComboBox#watermarkFileSelector {
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 10px;
 }
-QComboBox#watermarkFileSelector:hover { border-color: rgba(245,166,35,0.45); }
+QComboBox#watermarkFileSelector:hover { border-color: @accent_hover@; }
 QComboBox#watermarkFileSelector:focus {
-    border-color: #F5A623;
-    background: rgba(245,166,35,0.07);
+    border-color: @accent@;
+    background: rgba(@accent_rgb@,0.07);
 }
 QComboBox#watermarkFileSelector::drop-down {
     width: 28px;
@@ -164,11 +166,11 @@ QPushButton#watermarkApplyButton {
     border-radius: 10px;
 }
 QPushButton#watermarkApplyButton:hover {
-    background: rgba(255,255,255,0.09);
-    border-color: rgba(245,166,35,0.38);
+    background: @hover_background@;
+    border-color: @accent_hover@;
     color: #FFFFFF;
 }
-QPushButton#watermarkApplyButton:pressed { background: rgba(245,166,35,0.16); }
+QPushButton#watermarkApplyButton:pressed { background: @accent_pressed@; }
 
 QPushButton#watermarkSaveButton {
     min-height: 40px;
@@ -179,10 +181,10 @@ QPushButton#watermarkSaveButton {
 }
 QPushButton#watermarkSaveButton:hover {
     color: #E7E7E7;
-    background: rgba(255,255,255,0.05);
-    border-color: rgba(245,166,35,0.25);
+    background: @hover_background@;
+    border-color: @accent_hover@;
 }
-QPushButton#watermarkSaveButton:pressed { background: rgba(245,166,35,0.10); }
+QPushButton#watermarkSaveButton:pressed { background: @accent_pressed@; }
 
 QCheckBox#watermarkEnable,
 QWidget#settingsPage[glassCard="true"] QCheckBox {
@@ -198,10 +200,10 @@ QWidget#settingsPage[glassCard="true"] QCheckBox::indicator {
     border: 1px solid rgba(255,255,255,0.22);
     border-radius: 6px;
 }
-QWidget#settingsPage[glassCard="true"] QCheckBox::indicator:hover { border-color: rgba(245,166,35,0.60); }
+QWidget#settingsPage[glassCard="true"] QCheckBox::indicator:hover { border-color: @accent_hover@; }
 QWidget#settingsPage[glassCard="true"] QCheckBox::indicator:checked {
-    background: #F5A623;
-    border-color: #F5A623;
+    background: @accent@;
+    border-color: @accent@;
 }
 QWidget#settingsPage[glassCard="true"] QCheckBox::indicator:disabled {
     background: rgba(255,255,255,0.02);
@@ -219,10 +221,10 @@ QWidget#settingsPage[glassCard="true"] QAbstractSpinBox {
 }
 QWidget#settingsPage[glassCard="true"] QLineEdit:hover,
 QWidget#settingsPage[glassCard="true"] QComboBox:hover,
-QWidget#settingsPage[glassCard="true"] QAbstractSpinBox:hover { border-color: rgba(255,255,255,0.14); }
+QWidget#settingsPage[glassCard="true"] QAbstractSpinBox:hover { border-color: @accent_hover@; }
 QWidget#settingsPage[glassCard="true"] QLineEdit:focus,
 QWidget#settingsPage[glassCard="true"] QComboBox:focus,
-QWidget#settingsPage[glassCard="true"] QAbstractSpinBox:focus { border-color: #F5A623; }
+QWidget#settingsPage[glassCard="true"] QAbstractSpinBox:focus { border-color: @accent@; }
 
 /* All custom dropdowns use the same deterministic arrow strip and divider. */
 QComboBox[unifiedCombo="true"] {
@@ -246,7 +248,7 @@ QWidget#settingsPage[glassCard="true"] QWidget#optionalSequenceControl {
     border: 1px solid rgba(255,255,255,0.075);
     border-radius: 9px;
 }
-QWidget#settingsPage[glassCard="true"] QWidget#optionalSequenceControl:hover { border-color: rgba(255,255,255,0.14); }
+QWidget#settingsPage[glassCard="true"] QWidget#optionalSequenceControl:hover { border-color: @accent_hover@; }
 QWidget#settingsPage[glassCard="true"] QLineEdit#sequenceTextEdit {
     min-height: 0;
     padding-left: 10px;
@@ -274,7 +276,7 @@ QWidget#settingsPage[glassCard="true"] QToolButton#sequenceDownButton {
 QWidget#settingsPage[glassCard="true"] QToolButton#sequenceUpButton:hover,
 QWidget#settingsPage[glassCard="true"] QToolButton#sequenceDownButton:hover {
     color: #F2F2F2;
-    background: rgba(255,255,255,0.06);
+    background: @hover_background@;
 }
 
 QWidget#settingsPage[glassCard="true"] QPushButton#secondaryButton,
@@ -288,18 +290,18 @@ QWidget#settingsPage[glassCard="true"] QToolButton#secondaryToolButton {
 QWidget#settingsPage[glassCard="true"] QPushButton#secondaryButton:hover,
 QWidget#settingsPage[glassCard="true"] QToolButton#secondaryToolButton:hover {
     color: #F2F2F2;
-    background: rgba(255,255,255,0.075);
-    border-color: rgba(245,166,35,0.28);
+    background: @hover_background@;
+    border-color: @accent_hover@;
 }
 
 QPushButton#primaryButton {
-    background: #F5A623;
-    border-color: rgba(255,198,103,0.60);
+    background: @accent@;
+    border-color: rgba(@accent_rgb@,0.60);
 }
-QPushButton#primaryButton:hover { background: #FFB238; }
-QPushButton#primaryButton:pressed { background: #E28712; }
+QPushButton#primaryButton:hover { background: @accent_hover@; }
+QPushButton#primaryButton:pressed { background: @accent_pressed@; }
 
-/* Middle preview: selected means a clean ImageFlow-orange outline only. */
+/* Middle preview: selected means a clean ImageFlow-blue outline only. */
 QListWidget#sizePreviewList {
     selection-background-color: transparent;
     selection-color: inherit;
@@ -307,9 +309,9 @@ QListWidget#sizePreviewList {
 QListWidget#sizePreviewList::item:selected,
 QListWidget#sizePreviewList::item:selected:active,
 QListWidget#sizePreviewList::item:selected:!active {
-    background: transparent;
-    border: 2px solid #F5A623;
-    border-bottom: 2px solid #F5A623;
+    background: @selection@;
+    border: 2px solid @accent@;
+    border-bottom: 2px solid @accent@;
 }
 
 /* 尺寸清单的滚动视口使用实底，避免半透明页面滚动时出现暗影残留。 */
@@ -322,5 +324,5 @@ QListWidget#templateList::item {
     background: #1E1E1E;
 }
 QListWidget#templateList::item:hover {
-    background: #252525;
+    background: @hover_background@;
 }

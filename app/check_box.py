@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionButton
 
 
 class GuideCheckBox(QCheckBox):
-    """在主题橙色勾选框上稳定绘制白色对勾，不依赖系统主题图标。"""
+    """在主题强调色勾选框上稳定绘制白色对勾，不依赖系统主题图标。"""
 
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().paintEvent(event)

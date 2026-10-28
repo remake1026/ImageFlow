@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 from .image_processor import crop_box, paste_watermark, pil_to_pixmap
+from .theme import ACCENT
 from .models import CropSettings, SizeTemplate, WatermarkSettings
 
 
@@ -26,13 +27,13 @@ def create_crop_icon() -> QIcon:
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    painter.setPen(QPen(QColor("#F59A23"), 2))
+    painter.setPen(QPen(QColor(ACCENT), 2))
     # 两条裁剪角标，表现“裁剪”而不是简单的图片图标。
     painter.drawLine(4, 10, 4, 4)
     painter.drawLine(4, 4, 10, 4)
     painter.drawLine(20, 14, 20, 20)
     painter.drawLine(20, 20, 14, 20)
-    painter.setPen(QPen(QColor("#F59A23"), 1))
+    painter.setPen(QPen(QColor(ACCENT), 1))
     painter.drawLine(7, 7, 17, 17)
     painter.end()
     return QIcon(pixmap)

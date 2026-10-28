@@ -15,9 +15,10 @@ from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QProgressDialog, QScrollArea,
     QAbstractScrollArea, QSplitter, QSpinBox, QToolButton, QVBoxLayout, QWidget, QSizePolicy,
-    QStyle, QStyleOptionViewItem, QStyledItemDelegate,
+    QStyle, QStyleOptionViewItem, QStyledItemDelegate, QTabWidget,
 )
 
+from app.theme import ACCENT, SELECTION, HOVER_BACKGROUND, render_theme, theme_color
 from app.check_box import GuideCheckBox
 from app.combo_box import EditablePopupComboBox, StyledComboBox
 from app.crop_canvas import CropCanvas
@@ -153,17 +154,17 @@ class TemplateCheckDelegate(QStyledItemDelegate):
         # 每一行实底重绘，滚动时不会把前一帧的半透明阴影带入下一行。
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        background = QColor("#343434") if selected else QColor("#252525") if hovered else QColor("#1E1E1E")
+        background = theme_color(SELECTION) if selected else theme_color(HOVER_BACKGROUND) if hovered else QColor("#1E1E1E")
         painter.fillRect(option.rect, background)
         if selected:
-            painter.fillRect(QRect(option.rect.left(), option.rect.top(), 3, option.rect.height()), QColor("#8A8A8A"))
+            painter.fillRect(QRect(option.rect.left(), option.rect.top(), 3, option.rect.height()), QColor(ACCENT))
         box = QRect(option.rect.left() + 6, option.rect.center().y() - 8, 16, 16)
         painter.setBrush(QColor("#0B0D0F"))
         painter.setPen(QPen(QColor(255, 255, 255, 38), 1))
         painter.drawRoundedRect(box, 3, 3)
         check_state = index.data(Qt.ItemDataRole.CheckStateRole)
         if check_state == Qt.CheckState.Checked or check_state == 2:
-            painter.setPen(QPen(QColor("#F5A623"), 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            painter.setPen(QPen(QColor(ACCENT), 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             painter.drawLine(box.left() + 4, box.center().y(), box.left() + 7, box.bottom() - 4)
             painter.drawLine(box.left() + 7, box.bottom() - 4, box.right() - 3, box.top() + 4)
         painter.setPen(QColor("#F5F5F5") if selected else QColor("#B9B9B9"))
@@ -203,109 +204,6 @@ class ElidedPathLabel(QLabel):
         available_width = max(0, self.contentsRect().width())
         text = QFontMetrics(self.font()).elidedText(self._path, Qt.TextElideMode.ElideMiddle, available_width)
         super().setText(text)
-
-
-class AccordionHeader(QToolButton):
-    """带右侧箭头与短橙色灯条的设置区标题，仅负责视觉与点击状态。"""
-
-    def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("settingsAccordionHeader")
-        self._title = title
-        # 标题由 paintEvent 绘制，确保所有 Accordion 文本严格左对齐。
-        self.setText("")
-        self.setCheckable(True)
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self.isChecked():
-            center_y = self.height() / 2
-            # 外层半透明笔触模拟小面积橙色辉光，内层是 5×28px 的圆角灯条。
-            painter.setPen(QPen(QColor(245, 166, 35, 46), 13, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            painter.drawLine(11, round(center_y - 10), 11, round(center_y + 10))
-            painter.setPen(QPen(QColor("#F5A623"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            painter.drawLine(11, round(center_y - 12), 11, round(center_y + 12))
-        painter.setPen(QColor("#F2F2F2") if self.isChecked() else QColor("#B4B6BA"))
-        painter.drawText(self.rect().adjusted(28, 0, -50, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._title)
-        arrow = "⌄" if self.isChecked() else "›"
-        painter.drawText(self.rect().adjusted(0, 0, -16, 0), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, arrow)
-        painter.end()
-
-
-class SettingsAccordion(QWidget):
-    """支持多项同时展开的轻量设置折叠容器。"""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("settingsAccordion")
-        self._headers: list[AccordionHeader] = []
-        self._pages: list[QWidget] = []
-        self._expanded: list[bool] = []
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(8)
-
-    def addItem(self, page: QWidget, title: str) -> int:
-        index = len(self._pages)
-        header = AccordionHeader(title, self)
-        header.clicked.connect(lambda _checked=False, item_index=index: self._toggle_item(item_index))
-        self._headers.append(header)
-        self._pages.append(page)
-        self._expanded.append(index == 0)
-        self._layout.addWidget(header)
-        self._layout.addWidget(page)
-        header.setChecked(self._expanded[index])
-        page.setVisible(self._expanded[index])
-        return index
-
-    def count(self) -> int:
-        return len(self._pages)
-
-    def widget(self, index: int) -> QWidget:
-        return self._pages[index]
-
-    def setCurrentIndex(self, index: int) -> None:
-        """兼容旧调用：仅展开指定项，不影响其他已展开的项。"""
-        if index != -1 and not 0 <= index < len(self._pages):
-            return
-        if index == -1:
-            for item_index in range(len(self._pages)):
-                self.setItemExpanded(item_index, False)
-        else:
-            self.setItemExpanded(index, True)
-
-    def setItemExpanded(self, index: int, expanded: bool) -> None:
-        if not 0 <= index < len(self._pages):
-            return
-        self._expanded[index] = expanded
-        self._headers[index].setChecked(expanded)
-        self._pages[index].setVisible(expanded)
-        # 可见页面变化后立即让外层滚动区重新计算内容高度，避免首次展开时
-        # 仍沿用折叠前的紧凑尺寸。
-        self._layout.invalidate()
-        self.updateGeometry()
-
-    def isItemExpanded(self, index: int) -> bool:
-        return 0 <= index < len(self._expanded) and self._expanded[index]
-
-    def _toggle_item(self, index: int) -> None:
-        """每个标题独立切换，不影响其他已展开的设置页。"""
-        self.setItemExpanded(index, not self.isItemExpanded(index))
-
-    def currentIndex(self) -> int:
-        return next((index for index, expanded in enumerate(self._expanded) if expanded), -1)
-
-    def setItemIcon(self, index: int, icon: QIcon) -> None:
-        # 标题统一采用文字与右侧箭头，避免个别图标破坏左对齐节奏。
-        del index, icon
-
-    def setItemToolTip(self, index: int, text: str) -> None:
-        self._headers[index].setToolTip(text)
 
 
 class CustomSizeDialog(QDialog):
@@ -601,6 +499,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         self.canvas = CropCanvas()
         self.canvas.setObjectName("cropCanvas")
+        self.canvas.setToolTip("Alt + 滚轮缩放视图；空格 + 左键拖动画面；双击裁剪框切换成图预览")
         self.canvas.crop_changed.connect(self._on_canvas_crop_changed)
         self.canvas.watermark_changed.connect(self._on_canvas_watermark_changed)
         self.canvas.restore_requested.connect(self.auto_center)
@@ -620,12 +519,11 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda _=False, x=dx, y=dy: self.nudge_crop(x, y))
             controls.addWidget(button)
             self._crop_edit_controls.append(button)
-        fit = QPushButton("适合窗口")
-        fit.setObjectName("previewControlButton")
-        fit.setToolTip("恢复自动适配的裁剪视图")
-        fit.clicked.connect(self.auto_center)
-        controls.addWidget(fit)
-        self._crop_edit_controls.append(fit)
+        self.fit_button = QPushButton("适合窗口")
+        self.fit_button.setObjectName("previewControlButton")
+        self.fit_button.setToolTip("预览时重置查看比例和位置；编辑时恢复默认构图")
+        self.fit_button.clicked.connect(self._fit_canvas_view)
+        controls.addWidget(self.fit_button)
         self.guide_check = GuideCheckBox("显示三分法辅助线")
         self.guide_check.setObjectName("guideCheck")
         self.guide_check.setChecked(True)
@@ -678,42 +576,54 @@ class MainWindow(QMainWindow):
         panel_layout.setContentsMargins(0, 0, 0, 16)
         panel_layout.setSpacing(12)
 
-        self.right_settings_scroll = QScrollArea()
-        self.right_settings_scroll.setObjectName("rightSettingsScroll")
-        self.right_settings_scroll.setWidgetResizable(True)
-        self.right_settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.right_settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.right_settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
         root = QWidget()
         root.setObjectName("rightPanelRoot")
         layout = QVBoxLayout(root)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
-        self.toolbox = SettingsAccordion()
+        self.settings_tabs = QTabWidget()
+        self.settings_tabs.setObjectName("settingsTabs")
+        self.settings_tabs.setDocumentMode(True)
+        self.settings_tabs.setUsesScrollButtons(False)
+        self.settings_tabs.tabBar().setExpanding(True)
+        self.settings_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+        self.settings_tabs.tabBar().setObjectName("settingsTabBar")
         settings_pages = [
-            (self._size_page(), "尺寸设置"),
-            (self._crop_page(), "裁剪设置"),
-            (self._watermark_page(), "水印设置"),
-            (self._naming_page(), "命名设置"),
-            (self._export_page(), "导出设置"),
+            (self._size_page(), "尺寸"),
+            (self._crop_page(), "裁剪"),
+            (self._watermark_page(), "水印"),
+            (self._naming_page(), "命名"),
+            (self._export_page(), "导出"),
         ]
         for page, title in settings_pages:
             self._apply_glass_card_effect(page)
-            self.toolbox.addItem(page, title)
-        self.toolbox.setItemIcon(1, create_crop_icon())
-        self.toolbox.setItemToolTip(1, "裁剪设置；使用下方裁剪图标打开当前裁剪预览")
-        # 右侧面板的滚轮优先用于浏览设置内容；展开下拉列表后仍可滚动列表本身。
-        for combo in self.toolbox.findChildren(StyledComboBox):
+            # 每页保留自己的控件及滚动位置；标签栏不在滚动区内。
+            scroll = QScrollArea()
+            scroll.setObjectName("rightSettingsScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            content = QWidget()
+            content.setObjectName("settingsTabContent")
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(0, 10, 0, 0)
+            content_layout.setSpacing(0)
+            content_layout.addWidget(page)
+            content_layout.addStretch()
+            scroll.setWidget(content)
+            self.settings_tabs.addTab(scroll, title)
+        self.settings_tabs.setTabToolTip(1, "裁剪设置；使用裁剪图标打开当前裁剪预览")
+        # 滚轮浏览内容，不会无意改变下拉选项。
+        for combo in self.settings_tabs.findChildren(StyledComboBox):
             combo.setProperty("ignoreWheelSelection", True)
-        layout.addWidget(self.toolbox)
-        layout.addStretch()
-        self.right_settings_scroll.setWidget(root)
-        panel_layout.addWidget(self.right_settings_scroll, 1)
+        layout.addWidget(self.settings_tabs)
+        panel_layout.addWidget(root, 1)
 
         export_footer = QWidget()
         export_footer.setObjectName("exportFooter")
         export_footer_layout = QVBoxLayout(export_footer)
-        # 与滚动设置区内容使用相同的水平内边距，使底部导出按钮与折叠标题对齐。
+        # 与标签页使用相同的水平内边距，底部导出按钮保持固定位置。
         export_footer_layout.setContentsMargins(16, 0, 16, 0)
         export_footer_layout.setSpacing(8)
 
@@ -747,7 +657,7 @@ class MainWindow(QMainWindow):
         self.template_list = QListWidget()
         self.template_list.setObjectName("templateList")
         self.template_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        # 尺寸页初次展开时也应显示足够的列表区域；内容超出时由列表自身滚动。
+        # 尺寸页首次显示时也应提供足够的列表区域；内容超出时由列表自身滚动。
         self.template_list.setMinimumHeight(300)
         self.template_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.template_list.setItemDelegate(TemplateCheckDelegate(self.template_list))
@@ -1053,7 +963,7 @@ class MainWindow(QMainWindow):
         self.preserve_resolution_check = GuideCheckBox("保留原图分辨率（不压缩）")
         self.preserve_resolution_check.setChecked(self.export_settings.preserve_source_resolution)
         self.preserve_resolution_check.setToolTip("按所选比例裁剪，但不缩小像素尺寸；取消勾选后按模板的固定像素尺寸导出。")
-        # 与预览区“显示三分法辅助线”复用同一勾选控件：选中时在橙色方块上
+        # 与预览区“显示三分法辅助线”复用同一勾选控件：选中时在强调色方块上
         # 绘制白色对勾，避免仅显示色块而看不出当前是否已启用。
         self.subfolder_check = GuideCheckBox("按尺寸建立子文件夹"); self.subfolder_check.setChecked(True)
         self.overwrite_check = GuideCheckBox("允许覆盖同名文件")
@@ -1199,7 +1109,7 @@ class MainWindow(QMainWindow):
             return
         try:
             template = self.current_template()
-            self.canvas.set_content(self._thumbnail(photo.path), template, photo.crop(template.id), self.watermark_path, photo.watermark(template.id))
+            self.canvas.set_content(self._thumbnail(photo.path), template, photo.crop(template.id), self.watermark_path, photo.watermark(template.id), (photo.id, template.id), photo.path)
             self._show_editing_status()
             self._schedule_output_size_estimate()
         except Exception as error:
@@ -1310,7 +1220,7 @@ class MainWindow(QMainWindow):
                 preview = paste_watermark(preview, self.watermark_path, photo.watermark(template.id))
                 preview.thumbnail((66, 50), Image.Resampling.LANCZOS)
                 # 为 Selected 模式显式复用原始缩略图，避免 Qt 使用系统蓝色
-                # selection tint 生成选中态图标；橙色外框是唯一的选中视觉。
+                # selection tint 生成选中态图标；蓝色外框是唯一的选中视觉。
                 preview_pixmap = pil_to_pixmap(preview)
                 preview_icon = QIcon()
                 for mode in (QIcon.Mode.Normal, QIcon.Mode.Active, QIcon.Mode.Selected):
@@ -1610,6 +1520,7 @@ class MainWindow(QMainWindow):
         self.startup_worker = None
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.canvas.shutdown()
         if self.startup_worker and self.startup_worker.isRunning():
             self.startup_worker.cancel()
             self.startup_worker.wait(2000)
@@ -1771,6 +1682,7 @@ class MainWindow(QMainWindow):
         self._syncing = True
         editing_enabled = photo is not None and not self.canvas.is_result_preview()
         self.restore_composition_preview_button.setEnabled(photo is not None and self.canvas.is_result_preview())
+        self.fit_button.setEnabled(photo is not None)
         for widget in (self.zoom_control, self.x_slider, self.y_slider, *self._crop_edit_controls):
             widget.setEnabled(editing_enabled)
         if photo:
@@ -1779,11 +1691,18 @@ class MainWindow(QMainWindow):
             self.x_slider.setValue(round(crop.offset_x * 100)); self.y_slider.setValue(round(crop.offset_y * 100)); self.guide_check.setChecked(crop.guide_enabled)
         self._syncing = False
 
+    def _fit_canvas_view(self) -> None:
+        if self.canvas.is_result_preview() or self.canvas.has_view_transform():
+            self.canvas.reset_preview_view()
+        else:
+            self.auto_center()
+
     def _show_crop_result_preview(self) -> None:
         """双击画布，在默认构图和裁剪后成图预览之间循环切换。"""
         if not self.current_photo():
             return
         self.canvas.set_result_preview(not self.canvas.is_result_preview())
+        self.canvas.setFocus()
         self._sync_crop_controls()
 
     def _restore_default_composition_preview(self) -> None:
@@ -2211,7 +2130,7 @@ def _load_stylesheet() -> str:
         _resource_path("resources/styles/imageflow_glass_dark.qss"),
     )
     try:
-        return "\n\n".join(path.read_text(encoding="utf-8") for path in theme_paths)
+        return render_theme("\n\n".join(path.read_text(encoding="utf-8") for path in theme_paths))
     except OSError:
         # 主题文件缺失时仍可启动，避免影响导入、裁剪和导出等业务流程。
         return ""

@@ -6,7 +6,10 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QAbstractScrollArea, QComboBox, QStyle, QStyleOptionComboBox
 
 
-POPUP_LIST_STYLE = """
+from .theme import render_theme
+
+
+POPUP_LIST_STYLE = render_theme("""
 QAbstractItemView {
     color: #F2F2F2;
     background: #1B1C1E;
@@ -25,11 +28,11 @@ QAbstractItemView::item {
 }
 QAbstractItemView::item:hover {
     color: #FFFFFF;
-    background: rgba(245,166,35,0.16);
+    background: @hover_background@;
 }
 QAbstractItemView::item:selected {
-    color: #181818;
-    background: #F5A623;
+    color: #FFFFFF;
+    background: @selection@;
 }
 QScrollBar:vertical {
     width: 10px;
@@ -41,10 +44,10 @@ QScrollBar::handle:vertical {
     background: #55585D;
     border-radius: 4px;
 }
-QScrollBar::handle:vertical:hover { background: #F5A623; }
+QScrollBar::handle:vertical:hover { background: @accent_hover@; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-"""
+""")
 
 
 class StyledComboBox(QComboBox):
