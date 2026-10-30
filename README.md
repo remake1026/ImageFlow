@@ -17,14 +17,16 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
 1. 点击“导入照片”，选择需要交付的成片。
 2. 在“尺寸设置”中勾选需要的比例，并从“尺寸预览”选择要编辑的尺寸。
 3. 在画布中调整构图；在裁剪框内双击可查看裁剪后预览，再次双击或点击顶部“恢复默认构图预览”即可继续编辑。
-4. 在“水印设置”“命名设置”“导出设置”中配置输出规则。
-5. 点击“一键导出全部”，将所有已选尺寸批量导出。
+4. 在画布中，按住 Alt 滚动鼠标滚轮可围绕鼠标位置缩放；按住空格并拖动鼠标左键可查看细节，“适合窗口”可恢复预览视图。这些操作不改变裁剪结果。
+5. 在“水印设置”“命名设置”“导出设置”中配置输出规则。
+6. 点击“一键导出全部”，将所有已选尺寸批量导出。
 
 ## 核心功能
 
 - 批量导入 JPG、PNG、WebP、TIFF、BMP 等常用图片格式。
 - 内置原图比例、1:1、4:5、3:4、9:16、16:9 等尺寸，支持自定义尺寸。
 - 每张图片、每个尺寸独立保存裁剪缩放与位置；支持方向键微调、滚轮缩放、自动居中和三分法辅助线。
+- 画布放大时按需后台加载当前照片的高清预览，停止操作约 180 毫秒后请求清晰画面；最多保留一张约 128 MiB 的高清像素缓存，超大照片按上限缩小预览。
 - 支持透明 PNG 水印的位置、大小、透明度、旋转、边距与安全区设置；关闭水印后，预览和导出均不显示水印。
 - 支持品牌、SKU、颜色、日期、序号等命名规则，可选择保留原文件名或完全覆盖为规则名称。
 - 支持 JPG / PNG / WebP 导出、质量设置、ICC/EXIF 选项、按尺寸建立子文件夹和同名保护。
@@ -35,9 +37,9 @@ ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、�
 
 ### 方式一：使用安装包（推荐）
 
-**支持 Windows 10 1809 及以上、Windows 11（64 位），无需安装 Python。**
+**支持 Windows 10 1809 及以上（32 / 64 位）和 Windows 11，无需联网或安装 Python。一个安装包自动匹配系统位数。**
 
-1. 下载 [ImageFlow 1.1.0 安装程序（EXE）](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-1.1.0-Win10-11-Setup.exe)，双击打开中文安装向导。
+1. 下载 [ImageFlow 1.2.0 通用安装程序（EXE）](releases/ImageFlow-1.2.0-Windows-x86-x64-Setup.exe)，双击打开中文安装向导。
 2. 点击“下一步”，选择安装位置，例如 `D:\软件\ImageFlow`。
 3. 选择是否创建**桌面快捷方式**和**开始菜单快捷方式**，首次安装均默认勾选，可以取消。
 4. 点击“安装”，完成后可勾选“运行 ImageFlow”，再点击“完成”。
@@ -71,23 +73,34 @@ py -3.11 main.py
 
 ## 开发与打包
 
-项目使用 Python、PySide6、Pillow、PyInstaller 和 [NSIS 3](https://nsis.sourceforge.io/Download)。Windows x64 发行构建采用 Python 3.14，依赖固定在 `installer/requirements-build.txt`，Qt 限制在支持 Windows 10 的版本范围内。
+项目使用 Python、Pillow、PyInstaller 和 [NSIS 3](https://nsis.sourceforge.io/Download)。64 位使用 Python 3.14 + PySide6 / Qt6，32 位使用 Python 3.10.11 + PySide2 / Qt5。Qt6 不提供 Windows x86 版本，因此通过 `app/qt` 兼容层保持两种位数的功能一致。
+
+在 Windows 上安装 64 位 Python 3.11+（推荐 3.14）和 NSIS 3，双击：
 
 ```bat
 build.bat
 ```
 
-也可分步构建：
+构建脚本会下载并校验官方 32 位 Python 工具链，在 `installer_staging/` 创建独立环境，安装两套固定依赖，分别运行测试和打包，然后合并为一个离线安装程序。仅构建时需要联网。不会要求用户手动选择系统位数。
+
+也可使用命令行，并指定已有的 Python 或 NSIS：
 
 ```bat
-py -3.14 -m pip install -r installer/requirements-build.txt
-py -3.14 -m PyInstaller --noconfirm --clean "ImageFlow.spec"
-py -3.14 installer/build_installer.py
+py -3.14 installer/build_windows.py
+py -3.14 installer/build_windows.py --python-x86 C:\Python310-32\python.exe --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
 ```
 
-> `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 内的安装包会被保留并提交到仓库。
+输出：`releases/ImageFlow-1.2.0-Windows-x86-x64-Setup.exe`、`ImageFlow-Installer.zip` 和 `SHA256SUMS.txt`。安装器默认创建桌面及开始菜单快捷方式，可取消；支持自定义安装位置、记住更新路径和卸载保留用户文件。静默安装参数见 [安装说明](installer/README.txt)。
 
-输出：`releases/ImageFlow-1.1.0-Win10-11-Setup.exe`、兼容旧下载链接的 `ImageFlow-Installer.zip` 和 `SHA256SUMS.txt`。如 NSIS 不在 PATH，可给构建脚本传入 `--makensis C:\路径\makensis.exe`。静默安装参数见 [安装说明](installer/README.txt)。
+在没有安装 ImageFlow 的测试账户中验证安装、升级、快捷方式及卸载：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer/verify_installer.ps1
+```
+
+32 位程序受进程可用内存限制，处理超大照片建议使用 64 位 Windows。旧的 1.1.0 安装文件仅作为历史版本保留。
+
+> `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 内的安装包会被保留并提交到仓库。
 
 ## 项目结构
 

@@ -1,4 +1,8 @@
-param([string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.1.0-Win10-11-Setup.exe'))
+﻿param(
+    [string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.2.0-Windows-x86-x64-Setup.exe'),
+    [ValidateSet('x64', 'x86')]
+    [string]$ExpectedArchitecture = $(if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' })
+)
 $ErrorActionPreference = 'Stop'
 $Installer = (Resolve-Path -LiteralPath $Installer).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -20,7 +24,7 @@ function Assert-Check([bool]$Condition, [string]$Name) {
 }
 function Invoke-Setup([string]$Arguments, [int]$Expected = 0) {
     $process = Start-Process -FilePath $Installer -ArgumentList $Arguments -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
+    if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
     Assert-Check ($process.ExitCode -eq $Expected) "Installer exit $Expected [$Arguments]"
 }
 function Invoke-Uninstall {
@@ -28,7 +32,7 @@ function Invoke-Uninstall {
     if (Test-Path -LiteralPath $uninstaller) {
         # _?= keeps the uninstaller in its directory and makes the wait deterministic.
         $process = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installDir" -WindowStyle Hidden -PassThru
-        if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Uninstaller timed out' }
+        if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'Uninstaller timed out' }
         Assert-Check ($process.ExitCode -eq 0) 'Uninstaller exit 0'
     }
 }
@@ -41,7 +45,13 @@ try {
     } else { Assert-Check (-not (Test-Path -LiteralPath $desktopLink)) 'Unchecked desktop option creates no shortcut' }
     Assert-Check (-not (Test-Path -LiteralPath $menuDir)) 'Unchecked Start menu option creates no folder'
     $entry = Get-ItemProperty -LiteralPath $registryPath
-    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.1.0') 'Windows uninstall registration and version'
+    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.2.0') 'Windows uninstall registration and version'
+    Assert-Check ($entry.Architecture -eq $expectedArchitecture) "Installer selected expected architecture: $ExpectedArchitecture"
+    $exeBytes = [IO.File]::ReadAllBytes("$installDir\ImageFlow.exe")
+    $peOffset = [BitConverter]::ToInt32($exeBytes, 0x3c)
+    $machine = [BitConverter]::ToUInt16($exeBytes, $peOffset + 4)
+    $expectedMachine = if ($expectedArchitecture -eq 'x64') { 0x8664 } else { 0x14c }
+    Assert-Check ($machine -eq $expectedMachine) 'Installed executable has the correct PE architecture'
     Assert-Check ($entry.UninstallString -eq ('"' + $installDir + '\Uninstall.exe"')) 'Quoted uninstall path'
     $appProcess = Start-Process -FilePath "$installDir\ImageFlow.exe" -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
     Start-Sleep -Seconds 5

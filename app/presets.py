@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QStandardPaths
+from app.qt.QtCore import QStandardPaths
 
 
 def _path() -> Path:

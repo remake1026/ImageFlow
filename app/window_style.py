@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QMouseEvent, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from app.qt.QtCore import QEvent, QSize, Qt
+from app.qt.QtGui import QMouseEvent, QPixmap
+from app.qt.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 def enable_dark_title_bar(window: QWidget) -> None:

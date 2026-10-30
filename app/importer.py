@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PIL import Image
-from PySide6.QtCore import QThread, Signal
+from app.qt.QtCore import QThread, Signal
 
 from .image_processor import load_thumbnail
 

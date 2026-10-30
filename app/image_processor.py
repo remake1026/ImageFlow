@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageOps
-from PySide6.QtGui import QImage, QPixmap
+from app.qt.QtGui import QImage, QPixmap
 
 from .models import CropSettings, SizeTemplate, WatermarkSettings
 
@@ -123,13 +124,16 @@ def render_image(
 
 def pil_to_pixmap(image: Image.Image) -> QPixmap:
     rgba = image.convert("RGBA")
-    qimage = QImage(rgba.tobytes("raw", "RGBA"), rgba.width, rgba.height, QImage.Format.Format_RGBA8888)
+    # Qt5 borrows this buffer; keep it alive until QImage.copy() owns the pixels.
+    pixels = rgba.tobytes("raw", "RGBA")
+    qimage = QImage(pixels, rgba.width, rgba.height, rgba.width * 4, QImage.Format.Format_RGBA8888)
     return QPixmap.fromImage(qimage.copy())
 
 
 def thumbnail_cache_root() -> Path:
     """返回只用于 ImageFlow 图片预览的本地缓存目录。"""
-    local_root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+    local_root = (Path.home() / "Library" / "Caches" if sys.platform == "darwin"
+                  else Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())))
     return local_root / "ImageFlow" / "ImageFlow" / "thumbnail-cache"
 
 

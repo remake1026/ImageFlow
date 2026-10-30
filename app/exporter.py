@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from app.qt.QtCore import QThread, Signal
 
 from .image_processor import render_image
 from .models import CropSettings, ExportSettings, PhotoItem, SizeTemplate, WatermarkSettings

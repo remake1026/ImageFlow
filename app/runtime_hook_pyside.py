@@ -1,4 +1,4 @@
-"""冻结应用启动时注册 PySide6 的原生 DLL 目录。"""
+"""冻结应用启动时注册 Qt 的原生 DLL 目录。"""
 from __future__ import annotations
 
 import os
@@ -14,6 +14,8 @@ if sys.platform == "win32" and getattr(sys, "frozen", False):
         _bundle_dir,
         os.path.join(_bundle_dir, "PySide6"),
         os.path.join(_bundle_dir, "shiboken6"),
+        os.path.join(_bundle_dir, "PySide2"),
+        os.path.join(_bundle_dir, "shiboken2"),
     ):
         if os.path.isdir(_directory):
             sys._imageflow_dll_directory_handles.append(os.add_dll_directory(_directory))

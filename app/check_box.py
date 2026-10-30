@@ -1,13 +1,13 @@
 """应用内统一的自绘勾选框。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionButton
+from app.qt.QtCore import Qt
+from app.qt.QtGui import QColor, QPainter, QPen
+from app.qt.QtWidgets import QCheckBox, QStyle, QStyleOptionButton
 
 
 class GuideCheckBox(QCheckBox):
-    """在主题橙色勾选框上稳定绘制白色对勾，不依赖系统主题图标。"""
+    """在主题强调色勾选框上稳定绘制白色对勾，不依赖系统主题图标。"""
 
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().paintEvent(event)

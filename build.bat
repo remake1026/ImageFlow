@@ -7,24 +7,12 @@ if errorlevel 1 (
 ) else (
   set "PYTHON_CMD=py -3"
 )
-%PYTHON_CMD% -m pip install -r installer\requirements-build.txt
+%PYTHON_CMD% installer\build_windows.py
 if errorlevel 1 (
-  echo 依赖安装失败，无法打包。
-  pause
-  exit /b 1
-)
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean "ImageFlow.spec"
-if errorlevel 1 (
-  echo 打包失败，请查看上方错误信息。
-  pause
-  exit /b 1
-)
-%PYTHON_CMD% installer\build_installer.py
-if errorlevel 1 (
-  echo 安装包生成失败，请确认已安装 NSIS 3。
+  echo 打包失败，请查看上方错误信息。需要 64 位 Python 3.11+ 和 NSIS 3。
   pause
   exit /b 1
 )
 echo.
-echo 打包完成：releases\ImageFlow-1.1.0-Win10-11-Setup.exe
+echo 打包完成：releases\ImageFlow-1.2.0-Windows-x86-x64-Setup.exe
 pause

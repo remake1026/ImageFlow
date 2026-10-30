@@ -11,7 +11,8 @@ from pathlib import Path
 
 def user_products_csv_path() -> Path:
     """SKU 后台维护的数据写入用户目录，避免安装目录没有写权限。"""
-    local_root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+    local_root = (Path.home() / "Library" / "Application Support" if sys.platform == "darwin"
+                  else Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())))
     return local_root / "ImageFlow" / "ImageFlow" / "products.csv"
 
 

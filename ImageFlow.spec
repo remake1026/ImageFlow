@@ -1,16 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+import struct
+
+_qt_binding = 'PySide2' if struct.calcsize('P') == 4 else 'PySide6'
+
+if _qt_binding == 'PySide2':
+    # Qt5's embedded qt.conf loses non-ASCII prefixes on Windows. Use the
+    # installed wheel location so builds also work in Chinese project paths.
+    from PyInstaller.utils.hooks.qt import pyside2_library_info as _qt_info
+    _old_prefix = _qt_info.location['PrefixPath'].rstrip('/.')
+    _new_prefix = _qt_info.package_location.as_posix()
+    for _key, _value in _qt_info.location.items():
+        if _value.startswith(_old_prefix):
+            _qt_info.location[_key] = _new_prefix + _value[len(_old_prefix):]
+    _qt_info.qt_inside_package = True
+    _qt_info.qt_lib_dir = _qt_info.package_location
+
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[SPECPATH],
     binaries=[],
     datas=[('resources', 'resources'), ('products.csv', '.')],
-    hiddenimports=[],
+    hiddenimports=['app.qt'] + [f'{_qt_binding}.{module}' for module in ('QtCore', 'QtGui', 'QtWidgets', 'QtTest')],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['app/runtime_hook_pyside.py'],
-    excludes=['numpy'],
+    excludes=['numpy', 'PySide6' if _qt_binding == 'PySide2' else 'PySide2'],
     noarchive=False,
     optimize=0,
 )

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PIL import Image
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtWidgets import (
+from app.qt.QtCore import QEvent, Qt, Signal
+from app.qt.QtWidgets import (
     QApplication, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QVBoxLayout, QWidget, QInputDialog,
 )
