@@ -24,8 +24,7 @@ ENV/
 
 # Generated release archives
 *.zip
-/releases/*.exe
-/releases/SHA256SUMS.txt
+/releases/
 
 # IDE and editor local settings
 .idea/
@@ -44,3 +43,8 @@ Desktop.ini
 *.tmp
 *.temp
 ~$*
+
+# Private local settings and signing keys
+presets.json
+*.private.pem
+*.key

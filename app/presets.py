@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.qt.QtCore import QCoreApplication, QStandardPaths
+from app.qt.QtCore import QStandardPaths
 
 
 def _path() -> Path:
@@ -16,16 +16,7 @@ def _path() -> Path:
 
 def load_presets() -> dict[str, Any]:
     try:
-        path = _path()
-        if not path.exists() and QCoreApplication.organizationName() == "ImageFlow":
-            try:
-                QCoreApplication.setOrganizationName("ImageFlow")
-                legacy = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)) / "presets.json"
-            finally:
-                QCoreApplication.setOrganizationName("ImageFlow")
-            if legacy.is_file():
-                path = legacy
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"watermarks": {}, "naming": {}, "last_output": ""}
 

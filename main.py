@@ -2341,7 +2341,7 @@ class MainWindow(QMainWindow):
     # ---------- 项目文件 ----------
     def save_project(self) -> None:
         self._read_export_controls()
-        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "ImageFlow 项目 (*.imageflowproject);;旧版项目 (*.ImageFlowproject)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "ImageFlow 项目 (*.imageflowproject)")
         if path:
             try:
                 save_project(path, self.photos, self.templates, self.watermark_path, self.export_settings)
@@ -2349,7 +2349,7 @@ class MainWindow(QMainWindow):
             except Exception as error: self._error("保存项目失败", str(error))
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject *.ImageFlowproject)")
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject)")
         if not path: return
         try:
             photos, templates, watermark, settings = load_project(path)

@@ -2,16 +2,6 @@
 
 ImageFlow 是一款 Windows 桌面应用，将多尺寸裁剪、构图微调、水印、文件命名和批量导出集中在一个工作区中。所有编辑均以参数方式保存，**不会重命名、覆盖或修改导入的原始照片**。
 
-## 界面预览
-
-<p align="center">
-  <img src="docs/images/imageflow-overview.png" alt="ImageFlow 主界面：图片列表、裁剪画布、尺寸和水印设置" width="1000">
-</p>
-
-<p align="center">
-  <img src="docs/images/watermark-editor.png" alt="ImageFlow 水印编辑器：水印位置、尺寸、透明度和边距设置" width="1000">
-</p>
-
 ## 基本使用流程
 
 Windows 和 macOS 上，点击窗口关闭按钮会将 ImageFlow 隐藏到系统托盘或菜单栏，程序继续运行。通过图标菜单可重新打开窗口或退出；Windows 也可点击图标打开窗口。如果系统托盘不可用，关闭窗口将正常退出。
@@ -37,24 +27,9 @@ Windows 和 macOS 上，点击窗口关闭按钮会将 ImageFlow 隐藏到系统
 
 ## 安装教程
 
-### 方式一：使用安装包（推荐）
+旧版安装包已从仓库移除。当前可从源码运行，或按下方步骤自行构建 Windows / Mac 安装包。后续经过检查的安装包将通过 GitHub Releases 发布。
 
-**支持 Windows 10 1809 及以上（32 / 64 位）和 Windows 11，无需联网或安装 Python。一个安装包自动匹配系统位数。**
-
-1. 下载 [ImageFlow 1.2.0 通用安装程序（EXE）](releases/ImageFlow-1.2.0-Windows-x86-x64-Setup.exe)，双击打开中文安装向导。
-2. 点击“下一步”，选择安装位置，例如 `D:\软件\ImageFlow`。
-3. 选择是否创建**桌面快捷方式**和**开始菜单快捷方式**，首次安装均默认勾选，可以取消。
-4. 点击“安装”，完成后可勾选“运行 ImageFlow”，再点击“完成”。
-
-也可下载 [ZIP 版安装包](https://github.com/remake1026/ImageFlow/raw/refs/heads/master/releases/ImageFlow-Installer.zip)，解压后运行其中的 EXE。
-
-> 因安装包尚未进行数字签名，Windows 可能显示安全提示。请确认安装包来自本 GitHub 仓库后，按“更多信息”→“仍要运行”继续。
-
-**更新：** 先退出 ImageFlow，再运行新版安装包，选择原安装目录（包含 `ImageFlow.exe` 的文件夹）。
-
-**卸载：** Windows“设置 → 应用 → ImageFlow → 卸载”，或运行安装目录中的 `Uninstall.exe`。
-
-### 方式二：从源码运行（适合开发或希望自行更新）
+### 从源码运行
 
 1. 安装 [Python 3.11 或更高版本](https://www.python.org/downloads/)。安装时请勾选 **Add Python to PATH**。
 2. 下载本仓库的源码 ZIP，或执行：
@@ -113,9 +88,9 @@ py -3.14 installer/build_windows.py --python-x86 C:\Python310-32\python.exe --ma
 powershell -ExecutionPolicy Bypass -File installer/verify_installer.ps1
 ```
 
-32 位程序受进程可用内存限制，处理超大照片建议使用 64 位 Windows。旧的 1.1.0 安装文件仅作为历史版本保留。
+32 位程序受进程可用内存限制，处理超大照片建议使用 64 位 Windows。
 
-> `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 内的安装包会被保留并提交到仓库。
+> `build*`、`dist*` 与安装临时目录均为可再生成文件，已由 `.gitignore` 排除；`releases/` 为本地构建输出，不提交到代码仓库。
 
 ### 在 Mac 上构建安装包
 
@@ -136,10 +111,11 @@ app/                       裁剪画布、图像处理、导出与数据模型
 resources/                 图标与深色主题样式
 products.csv               SKU / 颜色下拉数据
 installer/                 发行包安装脚本
-releases/                  可下载的安装包
-docs/images/               README 配图
+releases/                  本地构建输出（不提交）
 ```
 
 ## 数据与隐私
 
 ImageFlow 在本机处理图片。裁剪、水印和命名均作为编辑参数保存，原始照片不会被修改；导出时仅生成新的输出文件。
+
+仓库自带的产品表仅含表头。使用者导入的产品数据、图片、水印和预设保存在自己的电脑上，不应提交到公共仓库。
