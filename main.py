@@ -3,19 +3,20 @@ from __future__ import annotations
 
 import copy
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image
 from app.qt.QtCore import Qt, QPoint, QRect, QSize, QTimer, Signal, QItemSelectionModel, QUrl
-from app.qt.QtGui import QAction, QColor, QFontMetrics, QIcon, QKeySequence, QShortcut, QPainter, QPen, QPixmap, QIntValidator, QDesktopServices
+from app.qt.QtGui import QAction, QColor, QCursor, QFontMetrics, QIcon, QKeySequence, QShortcut, QPainter, QPen, QPixmap, QIntValidator, QDesktopServices
 from app.qt.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QProgressDialog, QScrollArea,
     QAbstractScrollArea, QSplitter, QSpinBox, QToolButton, QVBoxLayout, QWidget, QSizePolicy,
-    QStyle, QStyleOptionViewItem, QStyledItemDelegate, QTabWidget,
+    QStyle, QStyleOptionViewItem, QStyledItemDelegate, QTabWidget, QMenu, QSystemTrayIcon,
 )
 
 from app.theme import ACCENT, SELECTION, HOVER_BACKGROUND, render_theme, theme_color
@@ -35,6 +36,10 @@ from app.window_style import CustomTitleBar, frameless_native_event
 from app.slider_value_control import ResettableSlider, SliderValueControl
 from app.presets import load_presets, save_presets
 from app.project_io import load_project, save_project
+from app.photo_navigation import PhotoNavigation
+from app.single_instance import SingleInstance
+from app.updater import UpdateCheckWorker, UpdateDownloadWorker
+from app.version import VERSION
 
 
 IMAGE_FILTER = "图片文件 (*.jpg *.jpeg *.png *.webp *.tif *.tiff *.bmp);;所有文件 (*)"
@@ -305,14 +310,18 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.photos: list[PhotoItem] = []
         self.templates = builtin_templates()
+        self._select_original_on_first_import = True
         self.watermark_path = ""
         self.active_watermark_preset = ""
+        self._watermark_draft = WatermarkSettings()
         self.export_settings = ExportSettings()
         self.current_photo_index = -1
         self.current_template_id = "original"
         self.thumbnail_cache: dict[str, Image.Image] = {}
         self._undo_stack: list[dict[str, object]] = []
         self._restoring_undo = False
+        self._exit_requested = False
+        self._tray_icon = None
         self._syncing = False
         self._syncing_photo_selection = False
         # 拖动裁剪框时只刷新画布；缩略图条在用户停下后再批量重绘，避免水印
@@ -329,18 +338,20 @@ class MainWindow(QMainWindow):
         self._estimated_output_bytes: Optional[int] = None
         self._size_estimate_worker: Optional[OutputSizeEstimateWorker] = None
         self.worker: Optional[ExportWorker] = None
+        self._update_check_worker = None
+        self._update_download_worker = None
         self._exporting_photos: list[PhotoItem] = []
         self.import_worker: Optional[ImportWorker] = None
         self.startup_worker: Optional[ImportWorker] = None
         self.presets = load_presets()
         self.product_catalog = load_product_catalog()
-        self.recent_color_by_product: dict[str, str] = {
-            product: color
-            for product, color in self.presets.get("recent_color_by_product", {}).items()
-            if isinstance(product, str) and isinstance(color, str)
+        self.recent_color_by_sku: dict[str, str] = {
+            sku: color
+            for sku, color in self.presets.get("recent_color_by_sku", self.presets.get("recent_color_by_product", {})).items()
+            if isinstance(sku, str) and isinstance(color, str)
         }
-        self.export_settings.output_folder = self.presets.get("last_output", "")
         self._build_ui()
+        self._setup_system_tray()
         self._restore_last_session()
         self._refresh_template_list()
         self._write_export_controls()
@@ -362,6 +373,7 @@ class MainWindow(QMainWindow):
             self,
             _resource_path("resources/imageflow-logo.png"),
             self.open_management_dialog,
+            self.check_for_updates,
         )
         self.setMenuWidget(self._title_bar)
 
@@ -371,7 +383,7 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QSize(18, 18))
         actions = [
             ("导入照片", self.import_photos), ("保存项目", self.save_project),
-            ("打开项目", self.open_project), ("上一张", self.previous_photo), ("下一张", self.next_photo),
+            ("打开项目", self.open_project),
         ]
         for text, handler in actions:
             action = QAction(text, self)
@@ -397,6 +409,10 @@ class MainWindow(QMainWindow):
         self._toolbar_right_reserve = QWidget()
         self._toolbar_right_reserve.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(self._toolbar_right_reserve)
+        navigation = PhotoNavigation(self.previous_photo, self.next_photo, self._toolbar_crop_group)
+        self._toolbar_crop_layout.addWidget(navigation)
+        self._photo_navigation_buttons = [navigation.previous_button, navigation.next_button]
+        self._toolbar_crop_layout.addSpacing(6)
         self.restore_composition_preview_button = QPushButton("恢复默认构图预览")
         self.restore_composition_preview_button.setObjectName("restoreCompositionPreviewButton")
         self.restore_composition_preview_button.setToolTip("从裁剪后预览返回默认构图编辑；不会改动裁剪参数")
@@ -527,7 +543,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.fit_button)
         self.guide_check = GuideCheckBox("显示三分法辅助线")
         self.guide_check.setObjectName("guideCheck")
-        self.guide_check.setChecked(True)
+        self.guide_check.setChecked(False)
         self.guide_check.toggled.connect(self._toggle_guides)
         self.guide_check.pressed.connect(self._push_undo_state)
         controls.addWidget(self.guide_check)
@@ -740,7 +756,7 @@ class MainWindow(QMainWindow):
         self.watermark_combo.setObjectName("watermarkFileSelector")
         self.watermark_combo.setToolTip("选择已保存水印预设，或点击“选择 PNG 水印…”和“编辑水印…”")
         self.watermark_combo.currentIndexChanged.connect(self._on_watermark_combo_selected)
-        hint = QLabel("在下拉列表中选择或编辑水印；编辑器会实时预览裁剪后的图片。")
+        hint = QLabel("在下拉列表中选择或编辑水印；未导入图片时使用示例画布预览。")
         hint.setWordWrap(True)
         hint.setObjectName("helperText")
         form.addRow(self.watermark_enable)
@@ -763,13 +779,13 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(14)
         form.setHorizontalSpacing(12)
         self.brand_edit = QLineEdit()
-        self.product_combo = EditablePopupComboBox()
+        self.sku_combo = EditablePopupComboBox()
         self.color_combo = EditablePopupComboBox()
-        self.product_combo.setObjectName("namingProductCombo")
+        self.sku_combo.setObjectName("namingSkuCombo")
         self.color_combo.setObjectName("namingColorCombo")
-        self.product_combo.setPlaceholderText("选择产品")
+        self.sku_combo.setPlaceholderText("选择 SKU")
         self.color_combo.setPlaceholderText("选择颜色")
-        self.product_combo.addItems(self.product_catalog)
+        self.sku_combo.addItems(self.product_catalog)
         self.date_edit = QLineEdit()
         self.date_edit.setObjectName("namingDateEdit")
         self.date_edit.setPlaceholderText("可留空，例如 2026-07-28")
@@ -779,9 +795,21 @@ class MainWindow(QMainWindow):
         self.sequence_spin = OptionalSequenceControl()
         self.replace_original_name_check = GuideCheckBox("是否覆盖原名称")
         self.sequence_spin.value_changed.connect(self._update_naming_rule_preview)
-        form.addRow("品牌", self.brand_edit); form.addRow("产品", self.product_combo); form.addRow("颜色", self.color_combo)
+        form.addRow("品牌", self.brand_edit); form.addRow("SKU", self.sku_combo); form.addRow("颜色", self.color_combo)
         form.addRow("日期", self.date_edit); form.addRow("起始序号", self.sequence_spin)
-        form.addRow(self.replace_original_name_check)
+        naming_actions = QHBoxLayout()
+        naming_actions.setContentsMargins(0, 0, 0, 0)
+        naming_actions.setSpacing(12)
+        naming_actions.addWidget(self.replace_original_name_check, 0, Qt.AlignmentFlag.AlignVCenter)
+        naming_actions.addStretch()
+        self.clear_naming_button = QPushButton("清空命名")
+        self.clear_naming_button.setObjectName("clearNamingButton")
+        self.clear_naming_button.setFixedHeight(28)
+        self.clear_naming_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_naming_button.setToolTip("清空当前命名内容并保留原图片名；不会删除已保存的 SKU、颜色或命名预设。")
+        self.clear_naming_button.clicked.connect(self.clear_naming_fields)
+        naming_actions.addWidget(self.clear_naming_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        form.addRow(naming_actions)
         form.addRow("命名预览", self.naming_preview_label)
         save = QPushButton("保存命名预设")
         save.setObjectName("secondaryButton")
@@ -789,17 +817,39 @@ class MainWindow(QMainWindow):
         form.addRow(save)
         self.brand_edit.textChanged.connect(self._update_naming_rule_preview)
         self.date_edit.textChanged.connect(self._update_naming_rule_preview)
-        self.product_combo.currentTextChanged.connect(self._update_naming_rule_preview)
-        self.product_combo.activated.connect(lambda _index: self._on_product_changed(self.product_combo.currentText()))
-        self.product_combo.lineEdit().editingFinished.connect(lambda: self._on_product_changed(self.product_combo.currentText()))
+        self.sku_combo.currentTextChanged.connect(self._update_naming_rule_preview)
+        self.sku_combo.activated.connect(lambda _index: self._on_sku_changed(self.sku_combo.currentText()))
+        self.sku_combo.lineEdit().editingFinished.connect(lambda: self._on_sku_changed(self.sku_combo.currentText()))
         self.color_combo.currentTextChanged.connect(self._on_color_changed)
         self.replace_original_name_check.toggled.connect(self._update_naming_rule_preview)
         self._update_naming_rule_preview()
         return page
 
-    def _on_product_changed(self, product: str) -> None:
-        colors = self.product_catalog.get(product.strip(), [])
-        preferred_color = self.recent_color_by_product.get(product.strip(), "")
+    def clear_naming_fields(self) -> None:
+        """只清空本次命名输入，保留下拉选项和后台产品数据。"""
+        controls = (
+            self.brand_edit, self.sku_combo, self.color_combo, self.date_edit,
+            self.sequence_spin, self.replace_original_name_check,
+        )
+        previous_signal_states = [control.blockSignals(True) for control in controls]
+        try:
+            self.brand_edit.clear()
+            for combo in (self.sku_combo, self.color_combo):
+                combo.setCurrentIndex(-1)
+                combo.setEditText("")
+            self.date_edit.clear()
+            self.sequence_spin.setValue(None)
+            self.replace_original_name_check.setChecked(False)
+        finally:
+            for control, blocked in zip(controls, previous_signal_states):
+                control.blockSignals(blocked)
+        self._read_export_controls()
+        self._update_naming_rule_preview()
+        self.statusBar().showMessage("已清空命名，将保留原图片名。", 3000)
+
+    def _on_sku_changed(self, sku: str) -> None:
+        colors = self.product_catalog.get(sku.strip(), [])
+        preferred_color = self.recent_color_by_sku.get(sku.strip(), "")
         current_color = self.color_combo.currentText().strip()
         self.color_combo.blockSignals(True)
         self.color_combo.clear()
@@ -814,16 +864,16 @@ class MainWindow(QMainWindow):
         self._on_color_changed(self.color_combo.currentText())
 
     def _on_color_changed(self, color: str) -> None:
-        product = self.product_combo.currentText().strip()
+        sku = self.sku_combo.currentText().strip()
         selected_color = color.strip()
-        if product and selected_color and self.recent_color_by_product.get(product) != selected_color:
-            self.recent_color_by_product[product] = selected_color
-            self.presets["recent_color_by_product"] = dict(self.recent_color_by_product)
+        if sku and selected_color and self.recent_color_by_sku.get(sku) != selected_color:
+            self.recent_color_by_sku[sku] = selected_color
+            self.presets["recent_color_by_sku"] = dict(self.recent_color_by_sku)
             save_presets(self.presets)
         self._update_naming_rule_preview()
 
     def open_management_dialog(self) -> None:
-        """打开独立管理页面，维护缓存和命名用产品。"""
+        """打开独立管理页面，维护缓存和命名用 SKU。"""
         dialog = ManagementDialog(self.product_catalog, self)
         dialog.catalog_changed.connect(self._on_product_catalog_changed)
         dialog.exec()
@@ -836,27 +886,27 @@ class MainWindow(QMainWindow):
         return super().nativeEvent(event_type, message)
 
     def _on_product_catalog_changed(self, catalog: object) -> None:
-        """后台保存后立即刷新主界面的产品/颜色下拉框。"""
+        """后台保存后立即刷新主界面的 SKU/颜色下拉框。"""
         if not isinstance(catalog, dict):
             return
         previous_catalog = self.product_catalog
-        current_product = self.product_combo.currentText().strip()
+        current_sku = self.sku_combo.currentText().strip()
         cleaned_catalog = {
-            str(product): [str(color) for color in colors]
-            for product, colors in catalog.items()
-            if isinstance(product, str) and isinstance(colors, list)
+            str(sku): [str(color) for color in colors]
+            for sku, colors in catalog.items()
+            if isinstance(sku, str) and isinstance(colors, list)
         }
         self.product_catalog = cleaned_catalog
-        removed_current = current_product in previous_catalog and current_product not in cleaned_catalog
-        self.product_combo.blockSignals(True)
-        self.product_combo.clear()
-        self.product_combo.addItems(cleaned_catalog)
-        if current_product and not removed_current:
-            self.product_combo.setEditText(current_product)
+        removed_current = current_sku in previous_catalog and current_sku not in cleaned_catalog
+        self.sku_combo.blockSignals(True)
+        self.sku_combo.clear()
+        self.sku_combo.addItems(cleaned_catalog)
+        if current_sku and not removed_current:
+            self.sku_combo.setEditText(current_sku)
         else:
-            self.product_combo.setCurrentIndex(-1)
-            self.product_combo.setEditText("")
-        self.product_combo.blockSignals(False)
+            self.sku_combo.setCurrentIndex(-1)
+            self.sku_combo.setEditText("")
+        self.sku_combo.blockSignals(False)
         if removed_current:
             self.color_combo.blockSignals(True)
             self.color_combo.clear()
@@ -865,13 +915,13 @@ class MainWindow(QMainWindow):
             self.color_combo.blockSignals(False)
             self._update_naming_rule_preview()
         else:
-            self._on_product_changed(self.product_combo.currentText())
-        self.statusBar().showMessage("产品数据已更新。", 3000)
+            self._on_sku_changed(self.sku_combo.currentText())
+        self.statusBar().showMessage("SKU 后台数据已更新。", 3000)
 
     def _update_naming_rule_preview(self, _value: str = "") -> None:
         prefix = " ".join(part for part in (
             self.brand_edit.text().strip(),
-            self.product_combo.currentText().strip(),
+            self.sku_combo.currentText().strip(),
             self.color_combo.currentText().strip(),
             self.date_edit.text().strip(),
         ) if part)
@@ -884,7 +934,7 @@ class MainWindow(QMainWindow):
         start_sequence = start_sequence or 1
         preview_settings = copy.copy(self.export_settings)
         preview_settings.brand = self.brand_edit.text().strip()
-        preview_settings.product = self.product_combo.currentText().strip()
+        preview_settings.product = self.sku_combo.currentText().strip()
         preview_settings.color = self.color_combo.currentText().strip()
         preview_settings.date = self.date_edit.text().strip()
         preview_settings.start_sequence = start_sequence
@@ -924,7 +974,7 @@ class MainWindow(QMainWindow):
         folder_layout.addWidget(folder_label)
         folder_layout.addWidget(browse)
 
-        # 复用产品下拉框的固定箭头栏，保持下拉箭头和右侧分割线位置一致。
+        # 复用 SKU 的固定箭头栏，保持下拉箭头和右侧分割线位置一致。
         self.format_combo = StyledComboBox(); self.format_combo.setObjectName("exportFormatCombo"); self.format_combo.addItems(["JPG", "PNG", "WEBP"])
         format_label = QLabel("格式")
         format_label.setObjectName("exportFieldLabel")
@@ -1042,11 +1092,26 @@ class MainWindow(QMainWindow):
             filename = QLabel(photo.filename)
             filename.setObjectName("photoFilename")
             filename.setToolTip(photo.filename)
+            filename.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             state_label = QLabel(state)
             state_label.setObjectName("photoState")
             state_label.setProperty("photoState", state_key)
+            delete_button = QToolButton()
+            delete_button.setObjectName("photoDeleteButton")
+            delete_button.setIcon(QIcon(str(_resource_path("resources/trash.svg"))))
+            delete_button.setIconSize(QSize(14, 14))
+            delete_button.setFixedSize(24, 24)
+            delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_button.setAccessibleName(f"移除图片：{photo.filename}")
+            delete_button.setToolTip("从列表移除此图片（不删除原文件，可撤销）")
+            delete_button.clicked.connect(lambda _checked=False, photo_id=photo.id: self.delete_photo(photo_id))
+            state_row = QHBoxLayout()
+            state_row.setContentsMargins(0, 0, 0, 0)
+            state_row.setSpacing(4)
+            state_row.addWidget(state_label, 1)
+            state_row.addWidget(delete_button)
             text_column.addWidget(filename)
-            text_column.addWidget(state_label)
+            text_column.addLayout(state_row)
             content_layout.addWidget(thumbnail)
             content_layout.addLayout(text_column, 1)
             self.photo_list.setItemWidget(item, content)
@@ -1106,7 +1171,7 @@ class MainWindow(QMainWindow):
             self._size_estimate_request += 1
             self._estimated_output_bytes = None
             self._size_estimate_timer.stop()
-            self.canvas.set_content(Image.new("RGBA", (1, 1)), SizeTemplate("empty", "", 1, 1), CropSettings(), "", WatermarkSettings())
+            self.canvas.set_content(None, SizeTemplate("empty", "", 1, 1), CropSettings(), "", WatermarkSettings())
             return
         try:
             template = self.current_template()
@@ -1363,6 +1428,7 @@ class MainWindow(QMainWindow):
     def _on_template_checked(self, item: QListWidgetItem) -> None:
         if self._syncing:
             return
+        self._select_original_on_first_import = False
         self._push_undo_state()
         template = next(item_ for item_ in self.templates if item_.id == item.data(Qt.ItemDataRole.UserRole))
         template.selected = item.checkState() == Qt.CheckState.Checked
@@ -1379,6 +1445,7 @@ class MainWindow(QMainWindow):
             "templates": copy.deepcopy(self.templates),
             "watermark_path": self.watermark_path,
             "active_watermark_preset": self.active_watermark_preset,
+            "watermark_draft": copy.deepcopy(self._watermark_draft),
             "export_settings": copy.deepcopy(self.export_settings),
             "current_photo_index": self.current_photo_index,
             "current_template_id": self.current_template_id,
@@ -1405,6 +1472,7 @@ class MainWindow(QMainWindow):
             self.templates = state["templates"]  # type: ignore[assignment]
             self.watermark_path = state["watermark_path"]  # type: ignore[assignment]
             self.active_watermark_preset = state["active_watermark_preset"]  # type: ignore[assignment]
+            self._watermark_draft = state["watermark_draft"]  # type: ignore[assignment]
             self.export_settings = state["export_settings"]  # type: ignore[assignment]
             self.current_photo_index = state["current_photo_index"]  # type: ignore[assignment]
             self.current_template_id = state["current_template_id"]  # type: ignore[assignment]
@@ -1425,10 +1493,12 @@ class MainWindow(QMainWindow):
         export["replace_original_name"] = self.export_settings.replace_original_name
         return {
             "version": 1,
+            "select_original_on_first_import": self._select_original_on_first_import,
             "photos": [photo.to_dict() for photo in self.photos],
             "templates": [template.to_dict() for template in self.templates],
             "watermark_path": self.watermark_path,
             "active_watermark_preset": self.active_watermark_preset,
+            "watermark_draft": self._current_watermark().to_dict(),
             "export": export,
             "current_photo_index": self.current_photo_index,
             "current_template_id": self.current_template_id,
@@ -1452,9 +1522,14 @@ class MainWindow(QMainWindow):
             templates = [SizeTemplate.from_dict(item) for item in data.get("templates", []) if isinstance(item, dict)]
             if templates:
                 self.templates = templates
+                # 旧会话已有尺寸选择，应原样保留（包括全部未勾选）。
+                self._select_original_on_first_import = bool(data.get("select_original_on_first_import", False))
             watermark_path = data.get("watermark_path", "")
             self.watermark_path = watermark_path if isinstance(watermark_path, str) and Path(watermark_path).is_file() else ""
             self.active_watermark_preset = str(data.get("active_watermark_preset", ""))
+            draft = data.get("watermark_draft", {})
+            if isinstance(draft, dict):
+                self._watermark_draft = WatermarkSettings.from_dict(draft)
             export = data.get("export", {})
             if isinstance(export, dict):
                 self.export_settings = ExportSettings.from_dict(export)
@@ -1520,15 +1595,154 @@ class MainWindow(QMainWindow):
             self.startup_worker.deleteLater()
         self.startup_worker = None
 
+    def _setup_system_tray(self) -> None:
+        if sys.platform not in ("win32", "darwin") or not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon = QIcon(str(_resource_path("resources/imageflow-logo.png")))
+        if icon.isNull():
+            return
+        self._tray_icon = QSystemTrayIcon(icon, self)
+        self._tray_icon.setToolTip("ImageFlow")
+        self._tray_menu = QMenu(self)
+        self._tray_menu.addAction("打开", self._show_from_tray)
+        self._tray_menu.addSeparator()
+        self._tray_menu.addAction("退出", self._quit_from_tray)
+        # Windows 自行定位，避免系统默认的右下展开方式盖住托盘图标。
+        # macOS 保留系统菜单栏的原生菜单定位。
+        if sys.platform != "win32":
+            self._tray_icon.setContextMenu(self._tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_tray_activated(self, reason) -> None:
+        if sys.platform == "win32" and reason == QSystemTrayIcon.ActivationReason.Context:
+            self._show_tray_menu()
+            return
+        # macOS 菜单栏点击由系统托盘菜单处理；Windows 单击或双击打开窗口。
+        if sys.platform == "win32" and reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                                                    QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._show_from_tray()
+
+    def _show_tray_menu(self) -> None:
+        cursor = QCursor.pos()
+        anchor = self._tray_icon.geometry()
+        # 某些 Windows 托盘折叠面板无法返回图标位置，此时围绕点击点留白。
+        if anchor.isEmpty() or not anchor.adjusted(-16, -16, 16, 16).contains(cursor):
+            anchor = QRect(cursor.x() - 12, cursor.y() - 12, 24, 24)
+        screen = QApplication.screenAt(anchor.center()) or QApplication.primaryScreen()
+        self._tray_menu.ensurePolished()
+        size = self._tray_menu.sizeHint()
+        position = _tray_menu_position(anchor, size, screen.availableGeometry())
+        self._tray_menu.popup(position)
+
+    def _quit_from_tray(self) -> None:
+        self._exit_requested = True
+        if not self.close():
+            self._exit_requested = False
+            return
+        QApplication.quit()
+
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if not self._exit_requested and self._tray_icon and self._tray_icon.isVisible():
+            event.ignore()
+            self.hide()
+            return
+        if ((self._update_check_worker and self._update_check_worker.isRunning()) or
+                (self._update_download_worker and self._update_download_worker.isRunning())):
+            self._show_from_tray()
+            self._info("正在检查更新", "请等待更新检查或下载完成后再关闭。")
+            event.ignore()
+            return
+        if ((self.import_worker and self.import_worker.isRunning()) or
+                (self.worker and self.worker.isRunning())):
+            self._show_from_tray()
+            self._info("任务进行中", "请等待导入或导出完成，或取消任务后再退出。")
+            event.ignore()
+            return
         self.canvas.shutdown()
         if self.startup_worker and self.startup_worker.isRunning():
             self.startup_worker.cancel()
-            self.startup_worker.wait(2000)
+            self.startup_worker.wait()
         if self._size_estimate_worker and self._size_estimate_worker.isRunning():
-            self._size_estimate_worker.wait(2000)
+            self._size_estimate_worker.wait()
         self._save_last_session()
+        if self._tray_icon:
+            self._tray_icon.hide()
         super().closeEvent(event)
+
+    def check_for_updates(self) -> None:
+        if self._update_check_worker and self._update_check_worker.isRunning():
+            return
+        self._update_check_worker = UpdateCheckWorker(VERSION)
+        self._update_check_worker.result.connect(self._on_update_checked)
+        self._update_check_worker.failed.connect(self._on_update_error)
+        self._update_check_worker.release_not_found.connect(self._on_update_release_not_found)
+        self.statusBar().showMessage("正在检查更新……")
+        self._update_check_worker.start()
+
+    def _on_update_release_not_found(self) -> None:
+        self.statusBar().clearMessage()
+        self._info("检查更新", "暂未找到已发布的更新版本。\n\n也可能是更新地址或访问权限有问题，请联系软件发布者。")
+
+    def _on_update_error(self, error: str) -> None:
+        if hasattr(self, "_update_progress"):
+            self._update_progress.close()
+        self.statusBar().clearMessage()
+        self._error("更新失败", f"{error}\n\n请检查网络，或稍后重试。")
+
+    def _on_update_checked(self, release: object) -> None:
+        self.statusBar().clearMessage()
+        if release is None:
+            self._info("检查更新", f"当前已是最新版本（{VERSION}）。")
+            return
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
+            self._info("发现新版本", f"最新版本：{release['version']}\n\n{release['notes']}\n\n请从 GitHub Releases 下载安装包。")
+            return
+        answer = QMessageBox.question(self, "发现新版本", f"当前版本：{VERSION}\n最新版本：{release['version']}\n\n{release['notes']}\n\n下载完成后将保存当前任务、关闭并更新 ImageFlow。是否继续？")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._update_download_worker = UpdateDownloadWorker(release)
+        self._update_download_worker.progress.connect(self._on_update_download_progress)
+        self._update_download_worker.result.connect(self._on_update_downloaded)
+        self._update_download_worker.failed.connect(self._on_update_error)
+        self._update_progress = QProgressDialog("正在下载安装包……", "", 0, 100, self)
+        self._update_progress.setCancelButton(None)
+        self._update_progress.setWindowTitle("更新 ImageFlow")
+        self._update_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._update_progress.setAutoClose(False)
+        self._update_progress.show()
+        self._update_download_worker.start()
+
+    def _on_update_download_progress(self, value: int) -> None:
+        self._update_progress.setValue(value)
+
+    def _on_update_downloaded(self, path: str) -> None:
+        self._update_progress.close()
+        if ((self.import_worker and self.import_worker.isRunning()) or
+                (self.worker and self.worker.isRunning())):
+            self._error("无法启动更新", "请等待导入或导出完成后再检查更新。")
+            return
+        try:
+            self.presets["last_session"] = self._session_payload()
+            save_presets(self.presets)
+            script = _resource_path("resources/install_update.ps1")
+            subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                              "-AppPid", str(os.getpid()), "-Installer", path, "-AppPath", sys.executable],
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, TypeError, ValueError) as error:
+            self._error("无法启动更新", str(error))
+            return
+        # 等待下载线程完全退出，再关闭窗口，避免销毁运行中的 QThread。
+        self._update_download_worker.wait()
+        if self._update_check_worker:
+            self._update_check_worker.wait()
+        self._exit_requested = True
+        self.close()
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if event.mimeData().hasUrls() and any(
@@ -1593,9 +1807,21 @@ class MainWindow(QMainWindow):
         added = len(result.thumbnails)
         if added:
             self._push_undo_state()
+            if self._select_original_on_first_import:
+                original = next((template for template in self.templates if template.id == "original"), None)
+                if original:
+                    original.selected = True
+                self._select_original_on_first_import = False
+                self._refresh_template_list()
+            # 每次导入以第一张成功读取的图片所在目录作为默认输出位置。
+            self.output_edit.setText(str(Path(result.thumbnails[0][0]).resolve().parent))
+            self.export_settings.output_folder = self.output_edit.text()
+            watermark = copy.deepcopy(self._current_watermark())
             self.current_photo_index = len(self.photos)
             for path, thumbnail in result.thumbnails:
-                self.photos.append(PhotoItem(path))
+                photo = PhotoItem(path)
+                photo.watermark_by_template = {template.id: copy.deepcopy(watermark) for template in self.templates}
+                self.photos.append(photo)
                 self.thumbnail_cache[path] = thumbnail
             self._refresh_photo_list()
             self._refresh_all()
@@ -1617,13 +1843,30 @@ class MainWindow(QMainWindow):
 
 
     def delete_selected_photos(self) -> None:
-        rows = sorted({item.row() for item in self.photo_list.selectedIndexes()}, reverse=True)
+        photo_ids = {item.data(Qt.ItemDataRole.UserRole) for item in self.photo_list.selectedItems()}
+        self._delete_photos(photo_ids)
+
+    def delete_photo(self, photo_id: str) -> None:
+        """卡片上的快捷删除只移除该图片，不影响其他多选项。"""
+        self._delete_photos({photo_id})
+
+    def _delete_photos(self, photo_ids: set[str]) -> None:
+        rows = [row for row, photo in enumerate(self.photos) if photo.id in photo_ids]
         if not rows:
             return
+        current = self.current_photo()
+        next_index = self.current_photo_index - sum(row < self.current_photo_index for row in rows)
         self._push_undo_state()
-        for row in rows:
+        if current:
+            self._watermark_draft = copy.deepcopy(current.watermark(self.current_template_id))
+        for row in reversed(rows):
             removed = self.photos.pop(row)
             self.thumbnail_cache.pop(removed.path, None)
+        # 删除当前图片前面的卡片时，保持正在编辑的图片不跳动。
+        self.current_photo_index = next(
+            (row for row, photo in enumerate(self.photos) if current and photo.id == current.id),
+            min(max(0, next_index), len(self.photos) - 1),
+        )
         self._refresh_photo_list(); self._refresh_all()
 
     def previous_photo(self) -> None:
@@ -1680,6 +1923,8 @@ class MainWindow(QMainWindow):
 
     def _sync_crop_controls(self) -> None:
         photo = self.current_photo()
+        for button in self._photo_navigation_buttons:
+            button.setEnabled(len(self.photos) > 1)
         self._syncing = True
         editing_enabled = photo is not None and not self.canvas.is_result_preview()
         self.restore_composition_preview_button.setEnabled(photo is not None and self.canvas.is_result_preview())
@@ -1755,23 +2000,28 @@ class MainWindow(QMainWindow):
         self._refresh_all(); self.statusBar().showMessage("已复制当前构图到其他尺寸。", 3000)
 
     # ---------- 水印 ----------
+    def _current_watermark(self) -> WatermarkSettings:
+        """空列表时使用可独立编辑的设置，导入照片后沿用这份配置。"""
+        photo = self.current_photo()
+        return photo.watermark(self.current_template_id) if photo else self._watermark_draft
+
     def choose_watermark(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择透明 PNG 水印", "", "PNG 图片 (*.png);;所有图片 (*.png *.webp)")
         if path:
             self._push_undo_state()
             self.watermark_path = path
             self.active_watermark_preset = ""
-            photo = self.current_photo()
-            if photo:
-                photo.watermark(self.current_template_id).enabled = True
-                self._apply_current_watermark_to_all_outputs()
+            self._current_watermark().enabled = True
+            self._apply_current_watermark_to_all_outputs()
             self._refresh_all()
 
     def _sync_watermark_controls(self) -> None:
         photo = self.current_photo()
         self._syncing = True
-        self.watermark_enable.setEnabled(photo is not None)
-        self.watermark_combo.setEnabled(photo is not None)
+        self.watermark_enable.setEnabled(True)
+        self.watermark_combo.setEnabled(True)
+        if photo:
+            self._watermark_draft = copy.deepcopy(photo.watermark(self.current_template_id))
         self.watermark_combo.blockSignals(True)
         self.watermark_combo.clear()
         watermark_presets = self.presets.get("watermarks", {})
@@ -1793,9 +2043,7 @@ class MainWindow(QMainWindow):
         active_index = self.watermark_combo.findData(f"preset:{self.active_watermark_preset}")
         self.watermark_combo.setCurrentIndex(active_index if active_index >= 0 else 0)
         self.watermark_combo.blockSignals(False)
-        if photo:
-            wm = photo.watermark(self.current_template_id)
-            self.watermark_enable.setChecked(wm.enabled)
+        self.watermark_enable.setChecked(self._current_watermark().enabled)
         self._syncing = False
 
     def _on_watermark_combo_selected(self, index: int) -> None:
@@ -1815,12 +2063,16 @@ class MainWindow(QMainWindow):
         """应用已保存的预设；新版预设同时保存 PNG 路径与水印参数。"""
         photo = self.current_photo()
         data = self.presets.get("watermarks", {}).get(name)
-        if not photo or not data:
+        if not data:
             return
         self._push_undo_state()
         settings_data = data.get("settings", data)
-        photo.watermark_by_template[self.current_template_id] = WatermarkSettings.from_dict(settings_data)
-        photo.watermark(self.current_template_id).enabled = True
+        watermark = WatermarkSettings.from_dict(settings_data)
+        watermark.enabled = True
+        if photo:
+            photo.watermark_by_template[self.current_template_id] = watermark
+        else:
+            self._watermark_draft = watermark
         if data.get("watermark_path"):
             self.watermark_path = data["watermark_path"]
         self.active_watermark_preset = name
@@ -1849,6 +2101,9 @@ class MainWindow(QMainWindow):
         preset_path = data.get("watermark_path")
         if isinstance(preset_path, str) and Path(preset_path).is_file():
             self.watermark_path = preset_path
+        enabled = self._watermark_draft.enabled
+        self._watermark_draft = copy.deepcopy(preset_settings)
+        self._watermark_draft.enabled = enabled
         for photo in self.photos:
             for template in self.templates:
                 enabled = photo.watermark(template.id).enabled
@@ -1858,9 +2113,9 @@ class MainWindow(QMainWindow):
 
     def _on_watermark_enabled(self, checked: bool) -> None:
         """将水印开关同步到本任务的全部照片和尺寸。"""
-        if self._syncing or not self.current_photo():
+        if self._syncing:
             return
-        wm = self.current_photo().watermark(self.current_template_id)
+        wm = self._current_watermark()
         wm.enabled = checked
         if checked:
             self._apply_current_watermark_to_all_outputs()
@@ -1875,10 +2130,8 @@ class MainWindow(QMainWindow):
 
     def _apply_current_watermark_to_all_outputs(self) -> None:
         """将当前尺寸的水印配置复制到所有照片、所有尺寸的导出参数。"""
-        photo = self.current_photo()
-        if not photo:
-            return
-        source = copy.deepcopy(photo.watermark(self.current_template_id))
+        source = copy.deepcopy(self._current_watermark())
+        self._watermark_draft = copy.deepcopy(source)
         for target_photo in self.photos:
             for template in self.templates:
                 target_photo.watermark_by_template[template.id] = copy.deepcopy(source)
@@ -1888,17 +2141,14 @@ class MainWindow(QMainWindow):
         self._schedule_output_size_estimate()
 
     def open_watermark_editor(self) -> None:
-        """在独立编辑器中调整水印，实时预览始终基于当前裁剪后的图片。"""
+        """有照片时预览裁剪结果；空列表时允许在示例画布上编辑水印。"""
         photo = self.current_photo()
-        if not photo:
-            self._info("没有可编辑的照片", "请先导入并选择一张照片。")
-            return
         dialog = WatermarkEditorDialog(
-            self._thumbnail(photo.path).copy(),
+            self._thumbnail(photo.path).copy() if photo else None,
             self.current_template(),
-            photo.crop(self.current_template_id),
+            photo.crop(self.current_template_id) if photo else CropSettings(),
             self.watermark_path,
-            photo.watermark(self.current_template_id),
+            self._current_watermark(),
             self.presets.get("watermarks", {}),
             self.active_watermark_preset,
             [(self._thumbnail(item.path).copy(), item.crop(self.current_template_id)) for item in self.photos],
@@ -1918,7 +2168,9 @@ class MainWindow(QMainWindow):
                 save_presets(self.presets)
             self.watermark_path = dialog.watermark_path
             self.active_watermark_preset = dialog.selected_preset_name
-            photo.watermark_by_template[self.current_template_id] = copy.deepcopy(dialog.watermark)
+            self._watermark_draft = copy.deepcopy(dialog.watermark)
+            if photo:
+                photo.watermark_by_template[self.current_template_id] = copy.deepcopy(dialog.watermark)
             if dialog.watermark.enabled:
                 self._apply_current_watermark_to_all_outputs()
             self._refresh_all()
@@ -1960,20 +2212,20 @@ class MainWindow(QMainWindow):
 
     def apply_watermark_to_all(self) -> None:
         photo = self.current_photo()
-        if not photo: return
+        if not photo:
+            self.statusBar().showMessage("水印设置已保留，导入照片后将应用到所有尺寸。", 3000)
+            return
         source = photo.watermark(self.current_template_id)
         for template in self.templates:
             if template.id != self.current_template_id: photo.watermark_by_template[template.id] = copy.deepcopy(source)
         self._refresh_all(); self.statusBar().showMessage("已应用当前水印设置到所有尺寸。", 3000)
 
     def save_watermark_preset(self) -> None:
-        photo = self.current_photo()
-        if not photo: return
         name, ok = QInputDialog.getText(self, "保存水印预设", "预设名称")
         if ok and name.strip():
             preset_name = name.strip()
             self.presets.setdefault("watermarks", {})[preset_name] = {
-                "settings": photo.watermark(self.current_template_id).to_dict(),
+                "settings": self._current_watermark().to_dict(),
                 "watermark_path": self.watermark_path,
             }
             self.active_watermark_preset = preset_name
@@ -1995,15 +2247,15 @@ class MainWindow(QMainWindow):
         s = self.export_settings
         s.output_folder = self.output_edit.text().strip(); s.image_format = self.format_combo.currentText(); s.jpg_quality = round(self.quality_control.value())
         s.preserve_source_resolution = self.preserve_resolution_check.isChecked(); s.subfolders = self.subfolder_check.isChecked(); s.overwrite = self.overwrite_check.isChecked(); s.keep_icc = self.icc_check.isChecked(); s.keep_exif = self.exif_check.isChecked()
-        s.brand = self.brand_edit.text().strip(); s.product = self.product_combo.currentText().strip(); s.color = self.color_combo.currentText().strip(); s.date = self.date_edit.text().strip(); s.start_sequence = self.sequence_spin.value(); s.replace_original_name = self.replace_original_name_check.isChecked(); s.naming_pattern = "{brand} {product} {color} {date} {sequence} {original}"
+        s.brand = self.brand_edit.text().strip(); s.product = self.sku_combo.currentText().strip(); s.color = self.color_combo.currentText().strip(); s.date = self.date_edit.text().strip(); s.start_sequence = self.sequence_spin.value(); s.replace_original_name = self.replace_original_name_check.isChecked(); s.naming_pattern = "{brand} {product} {color} {date} {sequence} {original}"
 
     def _write_export_controls(self) -> None:
         s = self.export_settings
         self.output_edit.setText(s.output_folder); self.format_combo.setCurrentText(s.image_format); self.quality_control.setValue(s.jpg_quality); self.preserve_resolution_check.setChecked(s.preserve_source_resolution); self.subfolder_check.setChecked(s.subfolders); self.overwrite_check.setChecked(s.overwrite); self.icc_check.setChecked(s.keep_icc); self.exif_check.setChecked(s.keep_exif)
         self.brand_edit.setText(s.brand); self.date_edit.setText(s.date)
-        product_index = self.product_combo.findText(s.product)
-        self.product_combo.setCurrentIndex(product_index if product_index >= 0 else -1)
-        self._on_product_changed(self.product_combo.currentText())
+        sku_index = self.sku_combo.findText(s.product)
+        self.sku_combo.setCurrentIndex(sku_index if sku_index >= 0 else -1)
+        self._on_sku_changed(self.sku_combo.currentText())
         color_index = self.color_combo.findText(s.color)
         self.color_combo.setCurrentIndex(color_index if color_index >= 0 else -1)
         self.sequence_spin.setValue(s.start_sequence)
@@ -2058,7 +2310,8 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes: return
         self.presets["last_output"] = self.export_settings.output_folder; save_presets(self.presets)
         self._exporting_photos = list(photos)
-        self.worker = ExportWorker(jobs, self.watermark_path, copy.deepcopy(self.export_settings))
+        self.worker = ExportWorker(jobs, self.watermark_path, copy.deepcopy(self.export_settings),
+                                   source_paths=[photo.path for photo in self.photos])
         self.progress = QProgressDialog("正在准备导出……", "取消导出", 0, len(jobs), self)
         self.progress.setWindowTitle("批量导出")
         self.progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -2088,7 +2341,7 @@ class MainWindow(QMainWindow):
     # ---------- 项目文件 ----------
     def save_project(self) -> None:
         self._read_export_controls()
-        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "ImageFlow 项目 (*.imageflowproject)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "ImageFlow 项目 (*.imageflowproject);;旧版项目 (*.ImageFlowproject)")
         if path:
             try:
                 save_project(path, self.photos, self.templates, self.watermark_path, self.export_settings)
@@ -2096,7 +2349,7 @@ class MainWindow(QMainWindow):
             except Exception as error: self._error("保存项目失败", str(error))
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject)")
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject *.ImageFlowproject)")
         if not path: return
         try:
             photos, templates, watermark, settings = load_project(path)
@@ -2106,6 +2359,9 @@ class MainWindow(QMainWindow):
                     if new_path: photo.path = new_path
             self.photos = [photo for photo in photos if Path(photo.path).is_file()]
             self.templates = templates or builtin_templates(); self.watermark_path = watermark if Path(watermark).is_file() else ""; self.export_settings = settings
+            self._select_original_on_first_import = False
+            self._watermark_draft = WatermarkSettings()
+            self.active_watermark_preset = ""
             self.thumbnail_cache.clear(); self.current_photo_index = 0 if self.photos else -1
             self.current_template_id = next((template.id for template in self.templates if template.id == "original"), self.templates[0].id)
             self._refresh_template_list(); self._write_export_controls(); self._refresh_photo_list(); self._refresh_all()
@@ -2118,6 +2374,20 @@ class MainWindow(QMainWindow):
 
     def _error(self, title: str, message: str) -> None:
         QMessageBox.critical(self, title, message)
+
+
+def _tray_menu_position(anchor: QRect, size: QSize, available: QRect) -> QPoint:
+    """优先在图标左上方展开，边缘空间不足时翻转并限制在当前屏幕。"""
+    gap = 8
+    x = anchor.left() - gap - size.width()
+    y = anchor.top() - gap - size.height()
+    if x < available.left():
+        x = anchor.right() + gap + 1
+    if y < available.top():
+        y = anchor.bottom() + gap + 1
+    x = max(available.left(), min(x, available.right() - size.width() + 1))
+    y = max(available.top(), min(y, available.bottom() - size.height() + 1))
+    return QPoint(x, y)
 
 
 def _resource_path(relative_path: str) -> Path:
@@ -2142,10 +2412,19 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("ImageFlow")
     app.setOrganizationName("ImageFlow")
+    try:
+        instance = SingleInstance()
+        if not instance.start_or_activate():
+            return 0
+    except (OSError, RuntimeError) as error:
+        QMessageBox.warning(None, "无法启动 ImageFlow", str(error))
+        return 1
+    app.aboutToQuit.connect(instance.close)
     app.setWindowIcon(QIcon(str(_resource_path("resources/imageflow-logo.ico"))))
     app.setStyle("Fusion")
     app.setStyleSheet(_load_stylesheet())
     window = MainWindow()
+    instance.activation_requested.connect(window._show_from_tray)
     window.show()
     return app.exec()
 

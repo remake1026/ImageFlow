@@ -42,8 +42,8 @@ def builtin_templates() -> list[SizeTemplate]:
     return [
         SizeTemplate("original", "原图比例", 0, 0),
         SizeTemplate("1x1", "1:1（1080×1080）", 1080, 1080),
-        SizeTemplate("4x5", "4:5（1080×1350）", 1080, 1350, True),
-        SizeTemplate("3x4", "3:4（1080×1440）", 1080, 1440, True),
+        SizeTemplate("4x5", "4:5（1080×1350）", 1080, 1350),
+        SizeTemplate("3x4", "3:4（1080×1440）", 1080, 1440),
         SizeTemplate("9x16", "9:16（1080×1920）", 1080, 1920),
         SizeTemplate("16x9", "16:9（1920×1080）", 1920, 1080),
     ]
@@ -55,7 +55,7 @@ class CropSettings:
     zoom: float = 1.0
     offset_x: float = 0.0
     offset_y: float = 0.0
-    guide_enabled: bool = True
+    guide_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -146,4 +146,7 @@ class ExportSettings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExportSettings":
+        data = dict(data)
+        if "sku" in data:
+            data.setdefault("product", data.pop("sku"))
         return cls(**data)

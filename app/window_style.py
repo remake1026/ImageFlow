@@ -46,6 +46,7 @@ class CustomTitleBar(QFrame):
         window: QWidget,
         logo_path: Path,
         management_handler: Callable[[], None],
+        update_handler: Callable[[], None],
     ) -> None:
         super().__init__(window)
         self._window = window
@@ -73,6 +74,12 @@ class CustomTitleBar(QFrame):
         management.setToolTip("清除预览缓存，添加、修改或删除命名用 产品")
         management.clicked.connect(management_handler)
 
+        update = QPushButton("检查更新", self)
+        update.setObjectName("titleBarMenuButton")
+        update.setCursor(Qt.CursorShape.PointingHandCursor)
+        update.setToolTip("检查 ImageFlow 的新版本")
+        update.clicked.connect(update_handler)
+
         self._minimize_button = self._window_button("—", "最小化", "minimize")
         self._maximize_button = self._window_button("□", "最大化", "maximize")
         self._close_button = self._window_button("×", "关闭", "close")
@@ -87,6 +94,7 @@ class CustomTitleBar(QFrame):
         layout.addWidget(brand)
         layout.addSpacing(8)
         layout.addWidget(management)
+        layout.addWidget(update)
         layout.addStretch(1)
         layout.addWidget(self._minimize_button)
         layout.addWidget(self._maximize_button)

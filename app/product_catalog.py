@@ -1,4 +1,4 @@
-"""Read product and color options from the bundled products.csv file."""
+"""Read SKU and color options from the bundled products.csv file."""
 from __future__ import annotations
 
 import csv
@@ -50,7 +50,7 @@ def parse_colors(value: str) -> list[str]:
 
 
 def load_product_catalog(path: Path | None = None) -> dict[str, list[str]]:
-    """Return product-to-colors mappings in products.csv order."""
+    """Return SKU -> colors, retaining the order from products.csv."""
     csv_path = path or products_csv_path()
     if not csv_path.exists():
         return {}
@@ -59,18 +59,30 @@ def load_product_catalog(path: Path | None = None) -> dict[str, list[str]]:
     reader = csv.DictReader(_read_csv_text(csv_path).splitlines())
     for row in reader:
         normalized = {str(key).strip().lower(): _clean(value) for key, value in row.items() if key is not None}
-        product = normalized.get("product") or normalized.get("产品") or ""
+        sku = normalized.get("sku") or normalized.get("product") or normalized.get("产品") or ""
         color_text = normalized.get("colors") or normalized.get("color") or normalized.get("颜色") or ""
         for color in parse_colors(color_text):
-            if color not in catalog.setdefault(product, []):
-                catalog[product].append(color)
-        if product and product not in catalog:
-            catalog[product] = []
-    return {product: colors for product, colors in catalog.items() if product}
+            if color not in catalog.setdefault(sku, []):
+                catalog[sku].append(color)
+        if sku and sku not in catalog:
+            catalog[sku] = []
+    return {sku: colors for sku, colors in catalog.items() if sku}
+
+
+def import_product_catalog(path: Path) -> dict[str, list[str]]:
+    """读取用户选择的 CSV，拒绝缺少产品列或没有有效 SKU 的文件。"""
+    reader = csv.reader(_read_csv_text(path).splitlines())
+    headers = next(reader, [])
+    if not any(header.strip().lower() in {"sku", "product", "产品"} for header in headers):
+        raise ValueError("CSV 需要包含 SKU、Product 或 产品 列。")
+    catalog = load_product_catalog(path)
+    if not catalog:
+        raise ValueError("文件中没有可导入的 SKU。")
+    return catalog
 
 
 def save_product_catalog(catalog: dict[str, list[str]], path: Path | None = None) -> Path:
-    """原子保存产品数据；默认写入当前用户的可写配置目录。"""
+    """原子保存 SKU 数据；默认写入当前用户的可写配置目录。"""
     destination = path or user_products_csv_path()
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f"{destination.name}.{os.getpid()}.tmp")
@@ -78,10 +90,10 @@ def save_product_catalog(catalog: dict[str, list[str]], path: Path | None = None
         with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(["Product", "Colors"])
-            for product, colors in catalog.items():
-                clean_product = _clean(product)
-                if clean_product:
-                    writer.writerow([clean_product, ", ".join(_clean(color) for color in colors if _clean(color))])
+            for sku, colors in catalog.items():
+                clean_sku = _clean(sku)
+                if clean_sku:
+                    writer.writerow([clean_sku, ", ".join(_clean(color) for color in colors if _clean(color))])
         temporary.replace(destination)
     except OSError:
         try:

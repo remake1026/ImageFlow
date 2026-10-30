@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.2.0-Windows-x86-x64-Setup.exe'),
+    [string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.3.0-Windows-x86-x64-Setup.exe'),
     [ValidateSet('x64', 'x86')]
     [string]$ExpectedArchitecture = $(if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' })
 )
@@ -45,7 +45,7 @@ try {
     } else { Assert-Check (-not (Test-Path -LiteralPath $desktopLink)) 'Unchecked desktop option creates no shortcut' }
     Assert-Check (-not (Test-Path -LiteralPath $menuDir)) 'Unchecked Start menu option creates no folder'
     $entry = Get-ItemProperty -LiteralPath $registryPath
-    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.2.0') 'Windows uninstall registration and version'
+    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.3.0') 'Windows uninstall registration and version'
     Assert-Check ($entry.Architecture -eq $expectedArchitecture) "Installer selected expected architecture: $ExpectedArchitecture"
     $exeBytes = [IO.File]::ReadAllBytes("$installDir\ImageFlow.exe")
     $peOffset = [BitConverter]::ToInt32($exeBytes, 0x3c)

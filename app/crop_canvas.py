@@ -65,7 +65,7 @@ class CropCanvas(QWidget):
             self._preview_identity = preview_identity
             self.reset_preview_view()
         self._detail_loader.set_source(source_path)
-        self._pixmap = pil_to_pixmap(image)
+        self._pixmap = pil_to_pixmap(image) if image is not None else QPixmap()
         self._template, self._crop, self._watermark = template, crop, watermark
         # 拖动裁剪框时会频繁刷新画布。水印文件未变时复用已经解码的 QPixmap，
         # 避免每一帧都从磁盘读取、解码 PNG。

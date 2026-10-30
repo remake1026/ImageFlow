@@ -26,7 +26,8 @@ stage="$(mktemp -d "$(pwd)/installer_staging/mac-dmg.XXXXXXXX")"
 trap 'rm -rf -- "$stage"' EXIT
 cp -R "dist/mac-$arch/ImageFlow.app" "$stage/"
 ln -s /Applications "$stage/Applications"
-output="$(pwd)/releases/ImageFlow-1.2.0-macOS-$arch.dmg"
+version="$("$python" -c 'from app.version import VERSION; print(VERSION)')"
+output="$(pwd)/releases/ImageFlow-${version}-macOS-$arch.dmg"
 if [[ -e "$output" ]]; then
   echo "输出文件已存在：$output；请先移走旧文件。" >&2
   exit 1

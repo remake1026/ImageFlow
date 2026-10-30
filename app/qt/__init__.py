@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 if sys.platform == "win32" and struct.calcsize("P") == 4:
-    from PySide2 import QtCore, QtGui, QtWidgets, QtTest
+    from PySide2 import QtCore, QtGui, QtWidgets, QtTest, QtNetwork
 
     # Qt5 wheels may retain a build-machine plugin prefix. Resolve locally for
     # both source environments and PyInstaller's _internal/PySide2 directory.
@@ -25,7 +25,7 @@ if sys.platform == "win32" and struct.calcsize("P") == 4:
         if not hasattr(_class, "exec"):
             _class.exec = _class.exec_
 else:
-    from PySide6 import QtCore, QtGui, QtWidgets, QtTest
+    from PySide6 import QtCore, QtGui, QtWidgets, QtTest, QtNetwork
 
-for _module in (QtCore, QtGui, QtWidgets, QtTest):
+for _module in (QtCore, QtGui, QtWidgets, QtTest, QtNetwork):
     sys.modules[f"{__name__}.{_module.__name__.rsplit('.', 1)[-1]}"] = _module

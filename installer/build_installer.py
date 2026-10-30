@@ -7,9 +7,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import zipfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.2.0"
+sys.path.insert(0, str(ROOT))
+from app.version import VERSION
 
 
 def nsis_path(path: Path) -> str:

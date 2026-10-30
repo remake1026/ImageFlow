@@ -167,6 +167,22 @@ QLabel#photoState[photoState="pending"] { color: #8A8A8A; }
 QLabel#photoState[photoState="adjusted"] { color: #B9B9B9; }
 QLabel#photoState[photoState="exported"] { color: @accent@; }
 QLabel#photoState[photoState="error"] { color: #D65C5C; }
+QToolButton#photoDeleteButton {
+    min-width: 22px;
+    min-height: 22px;
+    max-width: 22px;
+    max-height: 22px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+}
+QToolButton#photoDeleteButton:hover {
+    background: rgba(214,92,92,0.18);
+    border-color: rgba(214,92,92,0.35);
+}
+QToolButton#photoDeleteButton:pressed { background: rgba(214,92,92,0.30); }
+QToolButton#photoDeleteButton:focus { border-color: @accent@; }
 
 QWidget#anchorSelector { background: transparent; }
 QPushButton#anchorButton {
@@ -457,7 +473,7 @@ QFrame#managementCard {
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
 }
-QTreeWidget#productManagementTree {
+QTreeWidget#skuManagementTree {
     color: #E6E6E6;
     background: #181818;
     alternate-background-color: #1B1B1B;
@@ -465,17 +481,17 @@ QTreeWidget#productManagementTree {
     border-radius: 8px;
     outline: none;
 }
-QTreeWidget#productManagementTree::item {
+QTreeWidget#skuManagementTree::item {
     min-height: 32px;
     padding: 2px 7px;
     border-bottom: 1px solid rgba(255,255,255,0.035);
 }
-QTreeWidget#productManagementTree::item:hover { background: @hover_background@; }
-QTreeWidget#productManagementTree::item:selected {
+QTreeWidget#skuManagementTree::item:hover { background: @hover_background@; }
+QTreeWidget#skuManagementTree::item:selected {
     color: #FFFFFF;
     background: @selection@;
 }
-QTreeWidget#productManagementTree QHeaderView::section {
+QTreeWidget#skuManagementTree QHeaderView::section {
     min-height: 32px;
     padding: 0 8px;
     color: #B9B9B9;

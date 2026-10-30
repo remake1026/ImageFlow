@@ -19,11 +19,16 @@ class ReleaseCompatibilityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_old_sku_export_settings_are_usable(self):
+        settings = ExportSettings.from_dict({"sku": "Sample", "brand": "Brand"})
+        self.assertEqual(settings.product, "Sample")
+        self.assertEqual(settings.to_dict()["product"], "Sample")
+
     def test_management_dialog_modal_event_loop(self):
         dialog = ManagementDialog({"Sample": ["Red", "Blue"]})
         QTimer.singleShot(0, dialog.accept)
         self.assertEqual(dialog.exec(), QDialog.DialogCode.Accepted)
-        self.assertEqual(dialog.product_tree.topLevelItemCount(), 1)
+        self.assertEqual(dialog.sku_tree.topLevelItemCount(), 1)
         dialog.deleteLater()
 
     def test_watermark_editor_preview_and_modal_event_loop(self):

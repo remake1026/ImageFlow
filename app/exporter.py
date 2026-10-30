@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import re
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,9 +118,12 @@ class ExportWorker(QThread):
     completed = Signal(str)
     cancelled = Signal()
 
-    def __init__(self, jobs: list[ExportJob], watermark_path: str, settings: ExportSettings) -> None:
+    def __init__(self, jobs: list[ExportJob], watermark_path: str, settings: ExportSettings,
+                 source_paths: list[str] | None = None) -> None:
         super().__init__()
         self.jobs, self.watermark_path, self.settings = jobs, watermark_path, settings
+        self.source_paths = {os.path.normcase(str(Path(path).resolve())) for path in
+                             (source_paths if source_paths is not None else [job.photo.path for job in jobs])}
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -130,6 +134,7 @@ class ExportWorker(QThread):
         try:
             output_root.mkdir(parents=True, exist_ok=True)
             total = len(self.jobs)
+            written_paths: set[str] = set()
             for index, job in enumerate(self.jobs, start=1):
                 if self._cancelled:
                     self.cancelled.emit()
@@ -138,9 +143,13 @@ class ExportWorker(QThread):
                 folder.mkdir(parents=True, exist_ok=True)
                 extension = {"JPG": "jpg", "PNG": "png", "WEBP": "webp"}[self.settings.image_format]
                 destination = folder / f"{build_filename(self.settings, job.template, job.sequence, job.photo.filename)}.{extension}"
-                if destination.exists() and not self.settings.overwrite:
+                def conflicts(path: Path) -> bool:
+                    key = os.path.normcase(str(path.resolve()))
+                    return key in self.source_paths or key in written_paths or (path.exists() and not self.settings.overwrite)
+
+                if conflicts(destination):
                     stem, suffix, counter = destination.stem, destination.suffix, 2
-                    while destination.exists():
+                    while conflicts(destination):
                         destination = folder / f"{stem}_{counter}{suffix}"
                         counter += 1
                 image, icc, exif = render_image(
@@ -152,6 +161,7 @@ class ExportWorker(QThread):
                     self.settings.preserve_source_resolution,
                 )
                 save_encoded_image(image, destination, self.settings, icc, exif)
+                written_paths.add(os.path.normcase(str(destination.resolve())))
                 self.progress.emit(index, total, destination.name)
             self.completed.emit(str(output_root))
         except Exception as error:  # 导出错误交给界面以友好方式展示

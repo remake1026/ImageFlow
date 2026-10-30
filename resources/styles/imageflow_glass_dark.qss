@@ -10,6 +10,18 @@ QWidget#centerPanel, QSplitter#mainSplitter { background: #101112; }
 QWidget#leftPanel { background: #141516; }
 QWidget#cropToolbarGroup { background: transparent; }
 
+QToolButton#photoNavigationButton, QToolBar#mainToolbar QToolButton#photoNavigationButton {
+    padding: 0;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+}
+QToolButton#photoNavigationButton:hover, QToolBar#mainToolbar QToolButton#photoNavigationButton:hover { background: @hover_background@; }
+QToolButton#photoNavigationButton:pressed, QToolBar#mainToolbar QToolButton#photoNavigationButton:pressed { background: @selection@; border-color: @accent@; }
+QToolButton#photoNavigationButton:focus, QToolBar#mainToolbar QToolButton#photoNavigationButton:focus { border-color: @accent@; }
+QToolButton#photoNavigationButton:disabled, QToolBar#mainToolbar QToolButton#photoNavigationButton:disabled { background: transparent; }
+
 QToolBar#mainToolbar QCheckBox#cropResultPreviewCheck {
     color: #D7D8DA;
     font-size: 13px;
@@ -129,6 +141,23 @@ QLabel#namingPreview {
     color: #BFC1C4;
     font-size: 12px;
 }
+QPushButton#clearNamingButton {
+    min-height: 26px;
+    max-height: 26px;
+    padding: 0 12px;
+    color: #BFC1C4;
+    font-size: 12px;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 6px;
+}
+QPushButton#clearNamingButton:hover {
+    color: #F5F5F5;
+    background: @hover_background@;
+    border-color: rgba(@accent_rgb@,0.35);
+}
+QPushButton#clearNamingButton:pressed { background: @accent_pressed@; }
+QPushButton#clearNamingButton:focus { border-color: @accent@; }
 QLabel#exportFieldLabel, QLabel#outputPathCaption {
     color: #B4B6BA;
     font-size: 12px;

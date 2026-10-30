@@ -5,7 +5,7 @@ import copy
 from pathlib import Path
 from typing import Any, Optional
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from app.qt.QtCore import QEvent, Qt, Signal
 from app.qt.QtWidgets import (
     QApplication, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -18,6 +18,7 @@ from .combo_box import StyledComboBox
 from .image_processor import crop_box, paste_watermark, pil_to_pixmap
 from .models import CropSettings, SizeTemplate, WatermarkSettings
 from .slider_value_control import SliderValueControl
+from .photo_navigation import PhotoNavigation
 
 
 class WatermarkEditorDialog(QDialog):
@@ -29,7 +30,7 @@ class WatermarkEditorDialog(QDialog):
 
     def __init__(
         self,
-        source: Image.Image,
+        source: Optional[Image.Image],
         template: SizeTemplate,
         crop: CropSettings,
         watermark_path: str,
@@ -43,6 +44,16 @@ class WatermarkEditorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("水印编辑器")
         self.resize(1120, 720)
+        self._sample_preview = source is None
+        if source is None:
+            # 中性灰棋盘让黑、白水印都可见；示例画布仅用于编辑器预览。
+            source = Image.new("RGBA", (1200, 900), "#808080")
+            draw = ImageDraw.Draw(source)
+            square = 60
+            for y in range(0, source.height, square):
+                for x in range(0, source.width, square):
+                    if (x // square + y // square) % 2:
+                        draw.rectangle((x, y, x + square - 1, y + square - 1), fill="#929292")
         self._preview_items = [(item_source.convert("RGBA"), copy.deepcopy(item_crop)) for item_source, item_crop in (preview_items or [(source, crop)])]
         self._preview_index = max(0, min(preview_index, len(self._preview_items) - 1))
         self._template = template
@@ -75,23 +86,23 @@ class WatermarkEditorDialog(QDialog):
         self.preset_combo = StyledComboBox()
         self.preset_combo.setMinimumWidth(220)
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
-        self.previous_button = QPushButton("◀")
-        self.next_button = QPushButton("▶")
-        self.previous_button.setFixedSize(32, 28)
-        self.next_button.setFixedSize(32, 28)
+        navigation = PhotoNavigation(lambda: self._move_preview(-1), lambda: self._move_preview(1))
+        self.previous_button = navigation.previous_button
+        self.next_button = navigation.next_button
         self.previous_button.setToolTip("查看上一张图片添加水印后的预览")
         self.next_button.setToolTip("查看下一张图片添加水印后的预览")
-        self.previous_button.clicked.connect(lambda: self._move_preview(-1))
-        self.next_button.clicked.connect(lambda: self._move_preview(1))
         preview_toolbar.addWidget(self.preset_combo)
         preview_toolbar.addStretch()
-        preview_toolbar.addWidget(self.previous_button)
-        preview_toolbar.addWidget(self.next_button)
+        preview_toolbar.addWidget(navigation)
         self.preview_label = QLabel("裁剪后图片预览")
         self.preview_label.setObjectName("watermarkPreviewCanvas")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setMinimumSize(620, 580)
-        preview_tip = QLabel("预览使用当前裁剪结果；水印的位置、边距和比例均以裁剪后图片计算。")
+        preview_tip = QLabel(
+            "尚未导入图片，当前为示例画布；可先编辑并保存水印，导入后使用。"
+            if self._sample_preview else
+            "预览使用当前裁剪结果；水印的位置、边距和比例均以裁剪后图片计算。"
+        )
         preview_tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_column.addLayout(preview_toolbar)
         preview_column.addWidget(self.preview_label, 1)
@@ -329,7 +340,12 @@ class WatermarkEditorDialog(QDialog):
         self.previous_button.setEnabled(has_many)
         self.next_button.setEnabled(has_many)
         self._refresh_watermark_thumbnail()
-        image = paste_watermark(self._crop_image(), self.watermark_path, self.watermark)
+        preview_watermark = self.watermark
+        if self._sample_preview:
+            # 编辑时始终可见，不改变实际输出的启用开关。
+            preview_watermark = copy.deepcopy(self.watermark)
+            preview_watermark.enabled = True
+        image = paste_watermark(self._crop_image(), self.watermark_path, preview_watermark)
         pixmap = pil_to_pixmap(image)
         self.preview_label.setPixmap(pixmap.scaled(self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 

@@ -45,6 +45,7 @@ class CanvasInteractionTests(unittest.TestCase):
 
     def tearDown(self):
         # Test fixtures must not overwrite the user's saved session.
+        self.window._exit_requested = True
         with patch.object(self.window, '_save_last_session'):
             self.window.close()
         self.window.deleteLater()

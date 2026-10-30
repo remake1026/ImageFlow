@@ -2,6 +2,10 @@
 
 
 import struct
+import runpy
+from pathlib import Path
+
+VERSION = runpy.run_path(str(Path(SPECPATH) / 'app' / 'version.py'))['VERSION']
 
 _qt_binding = 'PySide2' if struct.calcsize('P') == 4 else 'PySide6'
 
@@ -22,7 +26,7 @@ a = Analysis(
     pathex=[SPECPATH],
     binaries=[],
     datas=[('resources', 'resources'), ('products.csv', '.')],
-    hiddenimports=['app.qt'] + [f'{_qt_binding}.{module}' for module in ('QtCore', 'QtGui', 'QtWidgets', 'QtTest')],
+    hiddenimports=['app.qt'] + [f'{_qt_binding}.{module}' for module in ('QtCore', 'QtGui', 'QtWidgets', 'QtTest', 'QtNetwork')],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['app/runtime_hook_pyside.py'],
@@ -77,8 +81,8 @@ app = BUNDLE(
     bundle_identifier='com.imageflow.desktop',
     info_plist={
         'CFBundleDisplayName': 'ImageFlow',
-        'CFBundleShortVersionString': '1.2.0',
-        'CFBundleVersion': '1.2.0',
+        'CFBundleShortVersionString': VERSION,
+        'CFBundleVersion': VERSION,
         'NSHighResolutionCapable': True,
     },
 )
