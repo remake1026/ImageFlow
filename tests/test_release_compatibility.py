@@ -23,7 +23,7 @@ class ReleaseCompatibilityTests(unittest.TestCase):
         dialog = ManagementDialog({"Sample": ["Red", "Blue"]})
         QTimer.singleShot(0, dialog.accept)
         self.assertEqual(dialog.exec(), QDialog.DialogCode.Accepted)
-        self.assertEqual(dialog.sku_tree.topLevelItemCount(), 1)
+        self.assertEqual(dialog.product_tree.topLevelItemCount(), 1)
         dialog.deleteLater()
 
     def test_watermark_editor_preview_and_modal_event_loop(self):

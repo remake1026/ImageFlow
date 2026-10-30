@@ -70,7 +70,7 @@ class CustomTitleBar(QFrame):
         management = QPushButton("管理后台", self)
         management.setObjectName("titleBarMenuButton")
         management.setCursor(Qt.CursorShape.PointingHandCursor)
-        management.setToolTip("清除预览缓存，添加、修改或删除命名用 SKU")
+        management.setToolTip("清除预览缓存，添加、修改或删除命名用 产品")
         management.clicked.connect(management_handler)
 
         self._minimize_button = self._window_button("—", "最小化", "minimize")

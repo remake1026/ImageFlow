@@ -134,7 +134,7 @@ def thumbnail_cache_root() -> Path:
     """返回只用于 ImageFlow 图片预览的本地缓存目录。"""
     local_root = (Path.home() / "Library" / "Caches" if sys.platform == "darwin"
                   else Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())))
-    return local_root / "ImageFlow" / "ImageFlow" / "thumbnail-cache"
+    return local_root / "ImageFlow" / "thumbnail-cache"
 
 
 def thumbnail_cache_info() -> tuple[int, int]:
