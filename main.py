@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import os
 import subprocess
+import shutil
+import tempfile
 import sys
 from pathlib import Path
 from typing import Optional
@@ -1670,7 +1672,8 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def check_for_updates(self) -> None:
-        if self._update_check_worker and self._update_check_worker.isRunning():
+        if ((self._update_check_worker and self._update_check_worker.isRunning()) or
+                (self._update_download_worker and self._update_download_worker.isRunning())):
             return
         self._update_check_worker = UpdateCheckWorker(VERSION)
         self._update_check_worker.result.connect(self._on_update_checked)
@@ -1701,6 +1704,7 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         self._update_download_worker = UpdateDownloadWorker(release)
+        self._update_download_worker.status.connect(lambda text: self._update_progress.setLabelText(text))
         self._update_download_worker.progress.connect(self._on_update_download_progress)
         self._update_download_worker.result.connect(self._on_update_downloaded)
         self._update_download_worker.failed.connect(self._on_update_error)
@@ -1724,9 +1728,14 @@ class MainWindow(QMainWindow):
         try:
             self.presets["last_session"] = self._session_payload()
             save_presets(self.presets)
-            script = _resource_path("resources/install_update.ps1")
+            delta = Path(path).suffix.lower() == '.json'
+            source = _resource_path('resources/install_delta.ps1' if delta else 'resources/install_update.ps1')
+            # Run outside the installation so replacing updater resources is safe.
+            helper_dir = Path(tempfile.mkdtemp(prefix='ImageFlow-helper-'))
+            script = helper_dir / source.name
+            shutil.copy2(source, script)
             subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
-                              "-AppPid", str(os.getpid()), "-Installer", path, "-AppPath", sys.executable],
+                              "-AppPid", str(os.getpid()), '-Plan' if delta else '-Installer', path, "-AppPath", sys.executable],
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, TypeError, ValueError) as error:
             self._error("无法启动更新", str(error))

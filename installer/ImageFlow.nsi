@@ -259,6 +259,8 @@ FunctionEnd
 
 Section "Uninstall"
   ; Delete only packaged files. Never recursively delete user files or AppData.
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\_internal\resources\remove_updated_files.ps1" -InstallDir "$INSTDIR"'
+  Pop $0
   !include "${DELETE_MANIFEST}"
   ReadRegStr $0 HKCU "${KEY}" "InstallLocation"
   ${If} $0 == $INSTDIR

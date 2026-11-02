@@ -8,6 +8,7 @@ from pathlib import Path
 
 RESOURCE_FILES = (
     "imageflow-logo.ico", "imageflow-logo.png", "install_update.ps1",
+    "install_delta.ps1", "remove_updated_files.ps1",
     "photo-next.svg", "photo-previous.svg", "spin-arrow-down.svg",
     "spin-arrow-up.svg", "trash.svg", "styles/imageflow_dark_orange.qss",
     "styles/imageflow_glass_dark.qss",

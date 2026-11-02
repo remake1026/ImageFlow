@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.version import VERSION
 from installer.public_assets import check_payload
+from installer.build_delta import build_delta
 
 
 def nsis_path(path: Path) -> str:
@@ -46,6 +47,7 @@ def main() -> None:
         parser.error("Install NSIS 3 (https://nsis.sourceforge.io/Download), or pass --makensis.")
     payloads = {"x64": ROOT / "dist/x64/ImageFlow", "x86": ROOT / "dist/x86/ImageFlow"}
     all_files, all_dirs, sizes = set(), set(), {}
+    delta_artifacts = []
     for arch, payload in payloads.items():
         check_payload(ROOT, payload)
         binding, qt = ("PySide6", "Qt6") if arch == "x64" else ("PySide2", "Qt5")
@@ -59,6 +61,7 @@ def main() -> None:
             if binary.suffix.lower() in (".exe", ".dll", ".pyd"):
                 if pe_machine(binary) != expected:
                     parser.error(f"Wrong architecture for {arch}: {binary}")
+        delta_artifacts.extend(build_delta(payload, ROOT / "releases", VERSION, arch))
         files = [p for p in payload.rglob("*") if p.is_file()]
         sizes[arch] = (sum(p.stat().st_size for p in files) + 1023) // 1024
         all_files.update(p.relative_to(payload) for p in files)
@@ -86,7 +89,7 @@ def main() -> None:
         bundle.write(output, output.name)
         bundle.write(ROOT / "installer/README.txt", "README.txt")
     checksums = []
-    for artifact in (output, archive):
+    for artifact in (output, archive, *delta_artifacts):
         with artifact.open("rb") as handle:
             checksums.append(f"{hashlib.file_digest(handle, 'sha256').hexdigest()}  {artifact.name}")
     (release / "SHA256SUMS.txt").write_text("\n".join(checksums) + "\n", encoding="ascii")

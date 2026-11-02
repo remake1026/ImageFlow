@@ -29,7 +29,7 @@ Windows 和 macOS 上，点击窗口关闭按钮会将 ImageFlow 隐藏到系统
 
 ### Windows 一键安装（推荐）
 
-下载 [ImageFlow 1.3.1 通用安装包](https://github.com/remake1026/ImageFlow/releases/download/v1.3.1/ImageFlow-1.3.1-Windows-x86-x64-Setup.exe)，或前往 [最新 Release](https://github.com/remake1026/ImageFlow/releases/latest)。安装包自带全部运行库，无需 Python 或联网安装依赖。
+下载 [ImageFlow 1.4.0 通用安装包](https://github.com/remake1026/ImageFlow/releases/download/v1.4.0/ImageFlow-1.4.0-Windows-x86-x64-Setup.exe)，或前往 [最新 Release](https://github.com/remake1026/ImageFlow/releases/latest)。安装包自带全部运行库，无需 Python 或联网安装依赖。
 
 1. 双击 EXE 打开中文安装向导。
 2. 选择安装目录，默认是 `%LOCALAPPDATA%\Programs\ImageFlow`，也可使用其他磁盘中有写入权限的文件夹。
@@ -65,16 +65,16 @@ py -3.11 main.py
 
 ### 发布和检查更新
 
-源码中已加入 Windows 安装版的“检查更新”功能，入口在“管理后台”右侧。1.3.1 为正式 Windows 发布版本。发现新版本后可选择下载安装；软件会先保存当前任务，退出后由安装程序升级，成功后重新打开。下载需要能访问 GitHub。源码运行或非 Windows 版本不会自动安装；Mac 更新流程尚未完成。
+源码中已加入 Windows 安装版的“检查更新”功能，入口在“管理后台”右侧。1.4.0 为正式 Windows 发布版本。发现新版本后先校验本地文件，只下载有变化或缺失的文件；无法增量更新（清单不兼容、分段下载不受支持、校验失败等）时自动下载完整安装包。应用增量文件前会备份被替换文件，安装出错先回滚，再自动运行完整安装包。软件会先保存当前任务，退出后由安装程序升级，成功后重新打开。下载需要能访问 GitHub。源码运行或非 Windows 版本不会自动安装；Mac 更新流程尚未完成。
 
 发布新版本时：
 
 1. 修改 `app/version.py` 中的 `VERSION`，并同步调整安装说明和安装验证脚本中的版本号。
 2. 按下方步骤构建并验证 Windows 安装包。
-3. 在 `remake1026/ImageFlow` 的 GitHub Releases 创建正式版本，标签使用例如 `v1.3.1`，填写更新说明，并上传构建出的 `ImageFlow-1.3.1-Windows-x86-x64-Setup.exe`。版本号和文件名必须一致，不能只提交到仓库的 `releases` 文件夹；草稿和预发布不会被最新正式版本检查采用。
+3. 在 `remake1026/ImageFlow` 的 GitHub Releases 创建正式版本，标签使用例如 `v1.4.0`，填写更新说明，并上传构建出的 `ImageFlow-1.4.0-Windows-x86-x64-Setup.exe`，以及两种架构的 `ImageFlow-<版本>-<架构>-manifest.json` 和 `ImageFlow-<版本>-<架构>-files.bin`。清单和数据包必须与安装器来自同一次构建。版本号和文件名必须一致，不能只提交到仓库的 `releases` 文件夹；草稿和预发布不会被最新正式版本检查采用。
 4. 检查 Release 附件已提供 SHA-256 digest，并用已安装的旧版本实际测试检查、下载、更新和重启。
 
-旧版没有更新入口，需要先手动安装一次包含此功能的版本。安装包目前未签名，Windows 可能显示安全提示。
+1.3.x 的更新器只支持完整安装包，首次升级到 1.4.0 仍需完整安装；从 1.4.0 开始支持后续版本的增量更新。安装包目前未签名，Windows 可能显示安全提示。
 
 项目使用 Python、Pillow、PyInstaller 和 [NSIS 3](https://nsis.sourceforge.io/Download)。64 位使用 Python 3.14 + PySide6 / Qt6，32 位使用 Python 3.10.11 + PySide2 / Qt5。Qt6 不提供 Windows x86 版本，因此通过 `app/qt` 兼容层保持两种位数的功能一致。
 
@@ -134,3 +134,5 @@ ImageFlow 在本机处理图片。裁剪、水印和命名均作为编辑参数�
 仓库自带的产品表仅含表头。使用者导入的产品数据、图片、水印和预设保存在自己的电脑上，不应提交到公共仓库。
 
 公开发行仅打包经过审核的资源白名单，产品表必须为空。构建时会拒绝包含客户产品数据的产品表，安装包中不包含用户预设、产品照片或水印素材。
+
+增量数据包由独立压缩的文件记录组成。更新器通过 HTTP Range 仅读取所需记录，每个文件解压后都校验 SHA-256；若服务器未返回精确的 206 字节范围，则使用完整安装包。跨版本比较以实际文件内容为准，不依赖逐版本补丁链。更新进度会显示变化文件数和下载总量。更新失败的恢复文件及日志保存在系统临时目录 `ImageFlow-delta-*` 中。

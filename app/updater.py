@@ -5,6 +5,10 @@ import hashlib
 import json
 import re
 import tempfile
+import shutil
+import sys
+
+from app.delta_update import prepare_delta
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -43,12 +47,33 @@ def parse_release(data: dict, current: str) -> dict | None:
     size = asset.get("size")
     if not isinstance(size, int) or not 0 < size <= MAX_INSTALLER_BYTES:
         raise ValueError("安装包大小无效。")
-    return {"version": version, "notes": str(data.get("body") or "暂无更新说明"),
+    result = {"current": current, "version": version, "notes": str(data.get("body") or "暂无更新说明"),
             "url": url, "sha256": digest[7:].lower(), "size": size, "name": name}
+    result['delta'] = {}
+    for arch in ('x64', 'x86'):
+        try:
+            entries = {}
+            for kind, suffix in (('manifest', 'manifest.json'), ('pack', 'files.bin')):
+                filename = f'ImageFlow-{version}-{arch}-{suffix}'
+                matches = [a for a in data.get('assets', []) if a.get('name') == filename]
+                if len(matches) != 1:
+                    raise ValueError('Missing delta asset')
+                item = matches[0]
+                expected_url = f'https://github.com/remake1026/ImageFlow/releases/download/{tag}/{filename}'
+                if item.get('browser_download_url') != expected_url or not re.fullmatch(r'sha256:[a-fA-F0-9]{64}', item.get('digest') or ''):
+                    raise ValueError('Invalid delta asset')
+                if type(item.get('size')) is not int or not 0 < item['size'] <= MAX_INSTALLER_BYTES:
+                    raise ValueError('Invalid delta size')
+                entries[kind] = {'url': expected_url, 'size': item['size'], 'sha256': item['digest'][7:].lower()}
+            result['delta'][arch] = entries
+        except (ValueError, KeyError, TypeError):
+            pass  # A release without a usable delta always retains full-install fallback.
+    return result
 
 
-def _request(url: str):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "ImageFlow-Updater", "Accept": "application/vnd.github+json"}), timeout=30)
+def _request(url: str, headers: dict | None = None):
+    accept = "application/vnd.github+json" if url.startswith("https://api.github.com/") else "application/octet-stream"
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "ImageFlow-Updater", "Accept": accept, **(headers or {})}), timeout=30)
 
 
 class UpdateCheckWorker(QThread):
@@ -76,15 +101,32 @@ class UpdateCheckWorker(QThread):
 
 class UpdateDownloadWorker(QThread):
     progress = Signal(int)
+    status = Signal(str)
     result = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, release: dict):
+    def __init__(self, release: dict, install_dir: Path | None = None):
         super().__init__()
         self.release = release
+        self.install_dir = install_dir or (Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else None)
 
     def run(self):
         path = None
+        if self.install_dir and self.release.get('delta'):
+            stage = Path(tempfile.mkdtemp(prefix='ImageFlow-delta-'))
+            try:
+                self.status.emit('正在检查增量更新……')
+                plan = prepare_delta(self.release, self.install_dir, stage, _request, self.progress.emit, self.status.emit)
+                self.result.emit(str(plan))
+                return
+            except Exception:
+                # This directory was created by this worker, never an installation or user-data directory.
+                if stage.parent.resolve() == Path(tempfile.gettempdir()).resolve() and stage.name.startswith('ImageFlow-delta-'):
+                    shutil.rmtree(stage, ignore_errors=True)
+                self.status.emit('增量更新不可用，正在下载完整安装包……')
+                self.progress.emit(0)
+        else:
+            self.status.emit('正在下载完整安装包……')
         try:
             with tempfile.NamedTemporaryFile(prefix="ImageFlow-update-", suffix=".exe", delete=False) as output:
                 path = Path(output.name)
@@ -92,7 +134,7 @@ class UpdateDownloadWorker(QThread):
                 count = 0
                 with _request(self.release["url"]) as response:
                     while True:
-                        block = response.read(1024 * 1024)
+                        block = response.read(64 * 1024)
                         if not block:
                             break
                         count += len(block)
