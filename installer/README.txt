@@ -1,23 +1,27 @@
-ImageFlow 1.3.0 安装说明
+ImageFlow 1.3.1 安装说明
 
 系统要求：Windows 10 1809（内部版本 17763）及以上（32 / 64 位），或 Windows 11。
-同一个 EXE 自动检测系统：64 位 Windows 安装 x64，32 位 Windows 安装 x86。
+同一个 EXE 自动检测架构：x64 系统安装 x64，x86 系统安装 x86。
+ARM64 系统通过 Windows 模拟运行：Windows 10 安装 x86，Windows 11 安装 x64；尚未在 ARM64 实机验证。
 安装包自带 Python、Qt 和图片处理运行库，无需联网或另行安装依赖。
 64 位使用 Qt6，32 位使用 Qt5；32 位程序可用内存较少，处理超大照片建议使用 64 位系统。
 
-1. 双击 ImageFlow-1.3.0-Windows-x86-x64-Setup.exe。
+1. 双击 ImageFlow-1.3.1-Windows-x86-x64-Setup.exe。
 2. 点击“下一步”，选择完整安装目录，例如 D:\软件\ImageFlow。
 3. 选择桌面和开始菜单快捷方式，首次安装均默认勾选，可取消。
 4. 安装结束后，可勾选“运行 ImageFlow”，再点击“完成”。
 
-默认安装到当前用户，无需管理员权限；请选择有写入权限的目录。
+默认安装到 %LOCALAPPDATA%\Programs\ImageFlow，无需管理员权限；请选择有写入权限的目录。
+SKU 数据：%LOCALAPPDATA%\ImageFlow\products.csv。
+预设与上次任务：%LOCALAPPDATA%\ImageFlow\ImageFlow\presets.json。
+导出照片的保存位置在软件“导出”设置中选择。
 更新：先退出 ImageFlow，再运行安装包。新版安装会记住上次路径和选项。
 旧 ZIP 版升级：选中原来包含 ImageFlow.exe 的目录，不要选它的父目录。
 卸载：Windows 设置 → 应用 → ImageFlow → 卸载，或运行 Uninstall.exe。
 卸载保留用户预设、SKU 数据、原图、项目及安装目录内用户自行添加的文件。
 
 静默安装（/D 必须放最后，路径不加引号）：
-ImageFlow-1.3.0-Windows-x86-x64-Setup.exe /S /DESKTOP=1 /STARTMENU=1 /D=D:\软件\ImageFlow
+ImageFlow-1.3.1-Windows-x86-x64-Setup.exe /S /DESKTOP=1 /STARTMENU=1 /D=D:\软件\ImageFlow
 将 1 改为 0 可取消相应快捷方式。静默安装不会自动启动软件。
 
 源码与安装包：https://github.com/remake1026/ImageFlow

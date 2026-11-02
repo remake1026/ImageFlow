@@ -6,6 +6,7 @@ import runpy
 from pathlib import Path
 
 VERSION = runpy.run_path(str(Path(SPECPATH) / 'app' / 'version.py'))['VERSION']
+_public_assets = runpy.run_path(str(Path(SPECPATH) / 'installer/public_assets.py'))
 
 _qt_binding = 'PySide2' if struct.calcsize('P') == 4 else 'PySide6'
 
@@ -25,7 +26,7 @@ a = Analysis(
     ['main.py'],
     pathex=[SPECPATH],
     binaries=[],
-    datas=[('resources', 'resources'), ('products.csv', '.')],
+    datas=_public_assets['release_datas'](Path(SPECPATH)),
     hiddenimports=['app.qt'] + [f'{_qt_binding}.{module}' for module in ('QtCore', 'QtGui', 'QtWidgets', 'QtTest', 'QtNetwork')],
     hookspath=[],
     hooksconfig={},

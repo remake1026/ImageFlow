@@ -7,10 +7,14 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from app.data_paths import configured_data_directory
 
 
 def user_products_csv_path() -> Path:
     """SKU 后台维护的数据写入用户目录，避免安装目录没有写权限。"""
+    configured = configured_data_directory()
+    if configured:
+        return configured / "products.csv"
     local_root = (Path.home() / "Library" / "Application Support" if sys.platform == "darwin"
                   else Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())))
     return local_root / "ImageFlow" / "products.csv"

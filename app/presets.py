@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from app.qt.QtCore import QStandardPaths
+from app.data_paths import configured_data_directory
 
 
 def _path() -> Path:
-    root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
+    root = configured_data_directory() or Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
     root.mkdir(parents=True, exist_ok=True)
     return root / "presets.json"
 

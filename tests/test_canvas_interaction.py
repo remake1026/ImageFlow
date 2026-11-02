@@ -11,7 +11,7 @@ from app.qt.QtGui import QMouseEvent, QWheelEvent
 from qt_test_support import QTest
 from app.qt.QtWidgets import QApplication
 
-from app.models import PhotoItem
+from app.models import PhotoItem, SizeTemplate
 from main import MainWindow, _load_stylesheet
 
 
@@ -145,6 +145,68 @@ class CanvasInteractionTests(unittest.TestCase):
         self.window.fit_button.click()
         self.assertFalse(self.canvas.has_view_transform())
         self.assertEqual(self.before, self.window.current_photo().to_dict())
+
+    def test_restore_initial_crop_for_each_size_in_both_modes(self):
+        self.window.templates.append(SizeTemplate('custom', '自定义', 700, 300, builtin=False))
+        for template in self.window.templates:
+            template.selected = True
+        for template in self.window.templates:
+            for preview in (False, True):
+                with self.subTest(template=template.id, preview=preview):
+                    self.window.current_template_id = template.id
+                    crop = self.window.current_photo().crop(template.id)
+                    crop.zoom, crop.offset_x, crop.offset_y = 2.5, 0.4, -0.3
+                    self.window._refresh_all()
+                    self.canvas.set_result_preview(preview)
+                    self.canvas._preview_zoom = 1.8
+                    self.canvas._preview_offset = QPointF(20, 30)
+                    self.window._sync_crop_controls()
+                    self.assertTrue(self.window.restore_composition_preview_button.isEnabled())
+                    self.window.restore_composition_preview_button.click()
+                    self.window._size_estimate_timer.stop()
+                    self.app.processEvents()
+                    self.assertFalse(self.canvas.is_result_preview())
+                    self.assertFalse(self.canvas.has_view_transform())
+                    self.assertEqual((crop.zoom, crop.offset_x, crop.offset_y), (1, 0, 0))
+                    frame, image = self.canvas._frame, self.canvas._image_rect
+                    aspect = 800 / 600 if template.id == 'original' else template.aspect
+                    expected_width = min(image.width(), image.height() * aspect)
+                    self.assertAlmostEqual(frame.width(), expected_width)
+                    self.assertAlmostEqual(frame.height(), expected_width / aspect)
+                    self.assertAlmostEqual(frame.center().x(), image.center().x())
+                    self.assertAlmostEqual(frame.center().y(), image.center().y())
+                    self.assertEqual(self.window.current_template_id, template.id)
+
+    def test_restore_is_scoped_and_undoable(self):
+        photo = self.window.current_photo()
+        photo.crop('4x5').zoom = 3
+        photo.crop('1x1').offset_x = 0.4
+        photo.crop('1x1').guide_enabled = True
+        photo.watermark('1x1').enabled = True
+        other = PhotoItem('other.png')
+        other.crop('1x1').zoom = 4
+        self.window.photos.append(other)
+        self.window.thumbnail_cache[other.path] = self.window.thumbnail_cache[photo.path]
+        self.window._refresh_photo_list()
+        self.window._refresh_all()
+        before = copy.deepcopy(self.window.photos)
+        self.window.restore_composition_preview_button.click()
+        self.assertEqual(photo.crop('4x5'), before[0].crop('4x5'))
+        self.assertEqual(photo.watermark_by_template, before[0].watermark_by_template)
+        self.assertTrue(photo.crop('1x1').guide_enabled)
+        self.assertEqual(other, before[1])
+        with patch('main.load_thumbnail', return_value=Image.new('RGBA', (800, 600), 'white')):
+            self.window.undo_last_action()
+        self.window._size_estimate_timer.stop()
+        self.assertEqual(self.window.photos, before)
+
+    def test_restore_without_photo_is_disabled(self):
+        self.window.photos.clear()
+        self.window.current_photo_index = -1
+        self.window._refresh_all()
+        self.assertFalse(self.window.restore_composition_preview_button.isEnabled())
+        self.window._restore_default_composition_preview()
+        self.assertEqual(self.window._undo_stack, [])
 
     def test_normal_wheel_edits_crop_only_in_edit_mode(self):
         self.wheel(Qt.KeyboardModifier.NoModifier)

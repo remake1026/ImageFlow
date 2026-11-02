@@ -14,5 +14,5 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo 打包完成：releases\ImageFlow-1.2.0-Windows-x86-x64-Setup.exe
+echo 打包完成，安装包位于 releases 文件夹。
 pause

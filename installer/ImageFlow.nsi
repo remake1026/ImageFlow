@@ -49,12 +49,8 @@ Function .onInit
   SetShellVarContext current
   ${If} ${RunningX64}
     SetRegView 64
-    StrCpy $Architecture "x64"
-    SectionSetSize 0 ${SIZE_X64_KB}
   ${Else}
     SetRegView 32
-    StrCpy $Architecture "x86"
-    SectionSetSize 0 ${SIZE_X86_KB}
   ${EndIf}
   ; Read the matching registry view; an explicit /D always takes precedence.
   ${GetParameters} $0
@@ -76,6 +72,24 @@ Function .onInit
     MessageBox MB_OK|MB_ICONSTOP "请先将 Windows 更新至 Windows 10 1809 或更高版本。" /SD IDOK
     SetErrorLevel 1
     Quit
+  ${EndIf}
+  ; Windows 10 ARM64 can emulate x86; Windows 11 adds x64 emulation.
+  StrCpy $Architecture "x86"
+  ${If} ${IsNativeAMD64}
+    StrCpy $Architecture "x64"
+  ${ElseIf} ${IsNativeARM64}
+    ${If} $0 >= 22000
+      StrCpy $Architecture "x64"
+    ${EndIf}
+  ${ElseIfNot} ${IsNativeIA32}
+    MessageBox MB_OK|MB_ICONSTOP "此系统架构不受支持。" /SD IDOK
+    SetErrorLevel 1
+    Quit
+  ${EndIf}
+  ${If} $Architecture == "x64"
+    SectionSetSize 0 ${SIZE_X64_KB}
+  ${Else}
+    SectionSetSize 0 ${SIZE_X86_KB}
   ${EndIf}
   System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\ImageFlowSetup") p .r0 ?e'
   StrCpy $MutexHandle $0
@@ -180,7 +194,7 @@ Section "ImageFlow"
   SetOutPath "$INSTDIR"
   SetOverwrite on
   ClearErrors
-  ${If} ${RunningX64}
+  ${If} $Architecture == "x64"
     File /r "${PAYLOAD_X64}\*.*"
   ${Else}
     File /r "${PAYLOAD_X86}\*.*"
@@ -203,7 +217,7 @@ Section "ImageFlow"
   WriteRegStr HKCU "${KEY}" "URLInfoAbout" "https://github.com/remake1026/ImageFlow"
   WriteRegDWORD HKCU "${KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${KEY}" "NoRepair" 1
-  ${If} ${RunningX64}
+  ${If} $Architecture == "x64"
     WriteRegDWORD HKCU "${KEY}" "EstimatedSize" ${SIZE_X64_KB}
   ${Else}
     WriteRegDWORD HKCU "${KEY}" "EstimatedSize" ${SIZE_X86_KB}

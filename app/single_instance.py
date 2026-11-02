@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.qt.QtCore import QObject, QLockFile, QStandardPaths, Signal
 from app.qt.QtNetwork import QLocalServer, QLocalSocket
+from app.data_paths import configured_data_directory
 
 
 class SingleInstance(QObject):
@@ -15,11 +16,12 @@ class SingleInstance(QObject):
 
     def __init__(self, directory: Path | None = None):
         super().__init__()
-        directory = directory or Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
+        directory = directory or configured_data_directory() or Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
         directory.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256(str(directory.resolve()).casefold().encode("utf-8")).hexdigest()[:24]
         self.name = "ImageFlow-" + key
-        self.lock = QLockFile(str(directory / "instance.lock"))
+        self.lock_path = directory / "instance.lock"
+        self.lock = QLockFile(str(self.lock_path))
         self.lock.setStaleLockTime(0)
         self.server = QLocalServer(self)
         self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
@@ -41,8 +43,17 @@ class SingleInstance(QObject):
             if sys.platform == "win32":
                 # 由刚被用户启动的进程授权后台窗口前置，避免 Windows 只闪烁任务栏。
                 import ctypes
-                info = self.lock.getLockInfo()
-                pid = info[1] if len(info) == 4 else info[0]
+                try:
+                    info = self.lock.getLockInfo()
+                    pid = info[1] if len(info) == 4 else info[0]
+                except TypeError:
+                    # PySide2 x86 cannot marshal this API's output parameters.
+                    # Qt stores the owning PID on the first line of its lock file.
+                    try:
+                        with self.lock_path.open("rb") as handle:
+                            pid = int(handle.readline(32).strip())
+                    except (OSError, ValueError):
+                        pid = 0
                 if isinstance(pid, int) and pid > 0:
                     ctypes.windll.user32.AllowSetForegroundWindow(pid)
             socket.connectToServer(self.name)

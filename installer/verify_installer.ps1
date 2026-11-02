@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.3.0-Windows-x86-x64-Setup.exe'),
+    [string]$Installer = (Join-Path $PSScriptRoot '..\releases\ImageFlow-1.3.1-Windows-x86-x64-Setup.exe'),
     [ValidateSet('x64', 'x86')]
     [string]$ExpectedArchitecture = $(if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' })
 )
@@ -14,6 +14,8 @@ $menuDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'ImageFlow'
 if (Test-Path -LiteralPath $registryPath) { throw 'Existing ImageFlow install detected; use a clean test account.' }
 if (Test-Path -LiteralPath $menuDir) { throw 'Existing ImageFlow Start menu folder detected; use a clean test account.' }
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+$previousDataDirectory = $env:IMAGEFLOW_DATA_DIR
+$env:IMAGEFLOW_DATA_DIR = Join-Path $testRoot 'user-data'
 $backupLink = Join-Path $testRoot 'original-desktop.lnk'
 if (Test-Path -LiteralPath $desktopLink) { Copy-Item -LiteralPath $desktopLink -Destination $backupLink }
 $results = [System.Collections.Generic.List[string]]::new()
@@ -45,7 +47,7 @@ try {
     } else { Assert-Check (-not (Test-Path -LiteralPath $desktopLink)) 'Unchecked desktop option creates no shortcut' }
     Assert-Check (-not (Test-Path -LiteralPath $menuDir)) 'Unchecked Start menu option creates no folder'
     $entry = Get-ItemProperty -LiteralPath $registryPath
-    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.3.0') 'Windows uninstall registration and version'
+    Assert-Check ($entry.InstallLocation -eq $installDir -and $entry.DisplayVersion -eq '1.3.1') 'Windows uninstall registration and version'
     Assert-Check ($entry.Architecture -eq $expectedArchitecture) "Installer selected expected architecture: $ExpectedArchitecture"
     $exeBytes = [IO.File]::ReadAllBytes("$installDir\ImageFlow.exe")
     $peOffset = [BitConverter]::ToInt32($exeBytes, 0x3c)
@@ -55,6 +57,11 @@ try {
     Assert-Check ($entry.UninstallString -eq ('"' + $installDir + '\Uninstall.exe"')) 'Quoted uninstall path'
     $appProcess = Start-Process -FilePath "$installDir\ImageFlow.exe" -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
     Start-Sleep -Seconds 5
+    $appProcess.Refresh()
+    Assert-Check (-not $appProcess.HasExited) 'Installed application remains running'
+    $secondary = Start-Process -FilePath "$installDir\ImageFlow.exe" -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    Assert-Check ($secondary.WaitForExit(15000) -and $secondary.ExitCode -eq 0) 'Second launch activates existing instance'
+    Start-Sleep -Milliseconds 500
     $appProcess.Refresh()
     Assert-Check (-not $appProcess.HasExited -and $appProcess.MainWindowTitle -match 'ImageFlow') 'Installed application opens its main window'
     Invoke-Setup "/S /D=$installDir" 3
@@ -91,4 +98,5 @@ try {
     if ($appProcess -and -not $appProcess.HasExited) { Stop-Process -Id $appProcess.Id }
     Invoke-Uninstall
     if (Test-Path -LiteralPath $backupLink) { Copy-Item -LiteralPath $backupLink -Destination $desktopLink -Force }
+    $env:IMAGEFLOW_DATA_DIR = $previousDataDirectory
 }

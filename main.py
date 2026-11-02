@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-from app.qt.QtCore import Qt, QPoint, QRect, QSize, QTimer, Signal, QItemSelectionModel, QUrl
+from app.qt.QtCore import Qt, QEvent, QPoint, QRect, QSize, QTimer, Signal, QItemSelectionModel, QUrl
 from app.qt.QtGui import QAction, QColor, QCursor, QFontMetrics, QIcon, QKeySequence, QShortcut, QPainter, QPen, QPixmap, QIntValidator, QDesktopServices
 from app.qt.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame,
@@ -413,9 +413,9 @@ class MainWindow(QMainWindow):
         self._toolbar_crop_layout.addWidget(navigation)
         self._photo_navigation_buttons = [navigation.previous_button, navigation.next_button]
         self._toolbar_crop_layout.addSpacing(6)
-        self.restore_composition_preview_button = QPushButton("恢复默认构图预览")
+        self.restore_composition_preview_button = QPushButton("恢复初始裁剪预览")
         self.restore_composition_preview_button.setObjectName("restoreCompositionPreviewButton")
-        self.restore_composition_preview_button.setToolTip("从裁剪后预览返回默认构图编辑；不会改动裁剪参数")
+        self.restore_composition_preview_button.setToolTip("恢复当前照片、当前尺寸的初始裁剪大小与居中位置，并重置预览缩放；支持撤销")
         self.restore_composition_preview_button.clicked.connect(self._restore_default_composition_preview)
         self._toolbar_crop_layout.addWidget(self.restore_composition_preview_button)
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -423,6 +423,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_left_panel())
         self._center_panel = self._build_center_panel()
         splitter.addWidget(self._center_panel)
+        self.photo_list.viewport().installEventFilter(self)
+        self.canvas.installEventFilter(self)
         splitter.addWidget(self._build_right_panel())
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
@@ -479,6 +481,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(heading)
         self.photo_list = QListWidget()
         self.photo_list.setObjectName("photoList")
+        self.photo_list.setToolTip("没有照片时，双击空白处导入图片")
         self.photo_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.photo_list.setIconSize(QSize(42, 42))
         self.photo_list.setSpacing(4)
@@ -496,27 +499,18 @@ class MainWindow(QMainWindow):
         row.addWidget(add)
         row.addWidget(delete)
         layout.addLayout(row)
-        nav = QHBoxLayout()
-        prev = QPushButton("← 上一张")
-        prev.setObjectName("secondaryButton")
-        prev.clicked.connect(self.previous_photo)
-        next_ = QPushButton("下一张 →")
-        next_.setObjectName("secondaryButton")
-        next_.clicked.connect(self.next_photo)
-        nav.addWidget(prev)
-        nav.addWidget(next_)
-        layout.addLayout(nav)
         return panel
 
     def _build_center_panel(self) -> QWidget:
         panel = QWidget()
         panel.setObjectName("centerPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
+        # 与两侧栏统一上下留白，使画布顶边和底部缩略图条对齐。
+        layout.setContentsMargins(12, 16, 12, 16)
         layout.setSpacing(10)
         self.canvas = CropCanvas()
         self.canvas.setObjectName("cropCanvas")
-        self.canvas.setToolTip("Alt + 滚轮缩放视图；空格 + 左键拖动画面；双击裁剪框切换成图预览")
+        self.canvas.setToolTip("没有照片时双击导入；Alt + 滚轮缩放视图；空格 + 左键拖动画面；双击裁剪框切换成图预览")
         self.canvas.crop_changed.connect(self._on_canvas_crop_changed)
         self.canvas.watermark_changed.connect(self._on_canvas_watermark_changed)
         self.canvas.restore_requested.connect(self.auto_center)
@@ -1766,6 +1760,19 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     # ---------- 图片与尺寸 ----------
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
+        if (
+            event.type() == QEvent.Type.MouseButtonDblClick
+            and watched in (self.photo_list.viewport(), self.canvas)
+            and event.button() == Qt.MouseButton.LeftButton
+            and not self.photos
+        ):
+            # 导入或恢复任务尚未完成时，不重复打开文件选择框。
+            if not any(worker and worker.isRunning() for worker in (self.import_worker, self.startup_worker)):
+                self.import_photos()
+            return True
+        return super().eventFilter(watched, event)
+
     def import_photos(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "选择修图成片", "", IMAGE_FILTER)
         self._import_photo_paths(paths)
@@ -1927,7 +1934,7 @@ class MainWindow(QMainWindow):
             button.setEnabled(len(self.photos) > 1)
         self._syncing = True
         editing_enabled = photo is not None and not self.canvas.is_result_preview()
-        self.restore_composition_preview_button.setEnabled(photo is not None and self.canvas.is_result_preview())
+        self.restore_composition_preview_button.setEnabled(photo is not None)
         self.fit_button.setEnabled(photo is not None)
         for widget in (self.zoom_control, self.x_slider, self.y_slider, *self._crop_edit_controls):
             widget.setEnabled(editing_enabled)
@@ -1952,9 +1959,17 @@ class MainWindow(QMainWindow):
         self._sync_crop_controls()
 
     def _restore_default_composition_preview(self) -> None:
-        """返回默认构图编辑预览，不改动任何裁剪参数。"""
+        """恢复当前照片在当前尺寸下的初始裁剪构图和查看状态。"""
+        photo = self.current_photo()
+        if photo is None:
+            return
+        self._push_undo_state()
+        crop = photo.crop(self.current_template_id)
+        crop.zoom = 1.0
+        crop.offset_x = crop.offset_y = 0.0
         self.canvas.set_result_preview(False)
-        self._sync_crop_controls()
+        self._refresh_all()
+        self._refresh_photo_statuses()
 
     def _on_zoom_control(self, value: float) -> None:
         if self._syncing or self.canvas.is_result_preview() or not self.current_photo(): return
@@ -2349,7 +2364,7 @@ class MainWindow(QMainWindow):
             except Exception as error: self._error("保存项目失败", str(error))
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject)")
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "ImageFlow 项目 (*.imageflowproject);;所有文件 (*)")
         if not path: return
         try:
             photos, templates, watermark, settings = load_project(path)

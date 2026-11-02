@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.version import VERSION
+from installer.public_assets import check_payload
 
 
 def nsis_path(path: Path) -> str:
@@ -46,6 +47,7 @@ def main() -> None:
     payloads = {"x64": ROOT / "dist/x64/ImageFlow", "x86": ROOT / "dist/x86/ImageFlow"}
     all_files, all_dirs, sizes = set(), set(), {}
     for arch, payload in payloads.items():
+        check_payload(ROOT, payload)
         binding, qt = ("PySide6", "Qt6") if arch == "x64" else ("PySide2", "Qt5")
         for required in ("ImageFlow.exe", f"_internal/{binding}/{qt}Core.dll",
                          f"_internal/{binding}/plugins/platforms/qwindows.dll"):
